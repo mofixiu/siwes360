@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:siwes360/auth/forgotPassword.dart';
+import 'package:siwes360/auth/signup.dart';
+import 'package:siwes360/screens/student/studentDashboard.dart';
 import 'package:siwes360/themes/theme.dart';
 import 'package:siwes360/widgets/customButton.dart';
-import 'package:provider/provider.dart';
+// import 'package:provider/provider.dart';
 
 class Login extends StatefulWidget {
   const Login({super.key});
@@ -230,7 +233,14 @@ class _LoginState extends State<Login> {
               Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: CustomButton(
-                  ontap: () {},
+                  ontap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => StudentDashboard(),
+                      ),
+                    );
+                  },
                   data: _isLoading ? "Logging in..." : "Login",
                   textcolor: Colors.white,
                   backgroundcolor: _isLoading ? Colors.grey : Color(0xFF0A3D62),
@@ -248,12 +258,10 @@ class _LoginState extends State<Login> {
               SizedBox(height: MediaQuery.of(context).size.height * 0.003),
               GestureDetector(
                 onTap: () {
-                  // Navigator.push(
-                  //   context,
-                  //   MaterialPageRoute(
-                  //     builder: (context) => ForgotPassword(),
-                  //   ),
-                  // );
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => ForgotPassword()),
+                  );
                 },
                 child: Text(
                   "Forgot Password?",
@@ -301,12 +309,10 @@ class _LoginState extends State<Login> {
                 padding: const EdgeInsets.all(20.0),
                 child: CustomButton(
                   ontap: () {
-                    // Navigator.push(
-                    //   context,
-                    //   MaterialPageRoute(
-                    //     builder: (context) => SignUp(),
-                    //   ),
-                    // );
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => SignUp()),
+                    );
                   },
                   data: "Create An Account",
                   textcolor: Colors.white,
