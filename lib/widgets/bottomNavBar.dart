@@ -4,7 +4,6 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:siwes360/screens/student/studentDashboard.dart';
 import 'package:siwes360/screens/student/studentLogbook.dart';
 import 'package:siwes360/screens/student/studentProfile.dart';
-import 'package:siwes360/screens/student/supervisorsScreenStudent.dart';
 import 'package:siwes360/themes/theme.dart';
 
 class BottomNavBar extends StatelessWidget {
@@ -24,9 +23,6 @@ class BottomNavBar extends StatelessWidget {
         nextPage = const StudentLogbook();
         break;
       case 2:
-        nextPage = const StudentSupervisorsScreen();
-        break;
-      case 3:
         nextPage = const StudentProfile();
         break;
       default:
@@ -35,7 +31,15 @@ class BottomNavBar extends StatelessWidget {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => nextPage),
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => nextPage,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // Smooth fade transition
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 150),
+        reverseTransitionDuration: const Duration(milliseconds: 150),
+      ),
     );
   }
 
@@ -66,10 +70,6 @@ class BottomNavBar extends StatelessWidget {
           BottomNavigationBarItem(
             icon: FaIcon(FontAwesomeIcons.bookBookmark),
             label: "Logbook",
-          ),
-          BottomNavigationBarItem(
-            icon: FaIcon(FontAwesomeIcons.peopleGroup),
-            label: "Supervisors",
           ),
           BottomNavigationBarItem(
             icon: FaIcon(FontAwesomeIcons.person),
