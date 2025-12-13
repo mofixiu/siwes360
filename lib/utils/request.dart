@@ -10,11 +10,10 @@ String get host {
   if (kIsWeb) {
     return "http://localhost:3001";
   } else if (Platform.isAndroid) {
-    // IMPORTANT: Change this to your machine's IP address
-    return "http://10.0.2.2:3001"; // For Android emulator
+    return "http://10.0.2.2:3001";
     // return "http://192.168.1.XXX:3001"; // For physical device
   } else if (Platform.isIOS) {
-    return "http://localhost:3001"; // For iOS simulator
+    return "http://localhost:3001";
   } else {
     return "http://localhost:3001";
   }
@@ -34,19 +33,16 @@ class RequestService {
     _dio.options.connectTimeout = const Duration(seconds: 30);
     _dio.options.receiveTimeout = const Duration(seconds: 30);
 
-    // Add interceptors
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
           log('REQUEST: ${options.method} ${options.uri}');
           log('DATA: ${options.data}');
 
-          // Add auth token for protected routes
           if (_authToken != null) {
             options.headers['Authorization'] = 'Bearer $_authToken';
           }
 
-          // Don't override Content-Type for FormData requests
           if (options.data is! FormData) {
             options.headers['Content-Type'] = 'application/json';
           }
@@ -93,6 +89,47 @@ class RequestService {
     return get('/auth/profile');
   }
 
+  // Student Methods
+  static Future<Map<String, dynamic>?> updateStudentInternshipDates(
+    int studentId,
+    String startDate,
+    String endDate, {
+    String? workplaceName,
+    String? workplaceAddress,
+    String? workplaceLocation,
+    int? supervisorId, // ADD THIS
+    String? supervisorName,
+    String? supervisorPhone,
+    String? supervisorEmail,
+  }) async {
+    return patch('/students/$studentId/internship-dates', {
+      'internship_start_date': startDate,
+      'internship_end_date': endDate,
+      'is_first_login': false,
+      'workplace_name': workplaceName,
+      'workplace_address': workplaceAddress,
+      'workplace_location': workplaceLocation,
+      'supervisor_id': supervisorId, // ADD THIS
+      'supervisor_name': supervisorName,
+      'supervisor_phone': supervisorPhone,
+      'supervisor_email': supervisorEmail,
+    });
+  }
+
+  static Future<Map<String, dynamic>?> getStudentDetails(int studentId) async {
+    return get('/students/$studentId');
+  }
+
+  static Future<Map<String, dynamic>?> getStudentDashboardData(
+    int studentId,
+  ) async {
+    return get('/students/$studentId/dashboard');
+  }
+
+  static Future<Map<String, dynamic>?> searchSupervisors(String query) async {
+    return get('/students/search/supervisors?query=$query');
+  }
+
   // Daily Log Methods
   static Future<Map<String, dynamic>?> createDailyLog(
     Map<String, dynamic> logData,
@@ -129,6 +166,19 @@ class RequestService {
 
   static Future<Map<String, dynamic>?> deleteDailyLog(int logId) async {
     return delete('/logs/$logId');
+  }
+
+  // Supervisor Methods
+  static Future<Map<String, dynamic>?> getSupervisorStudents(
+    int supervisorId,
+  ) async {
+    return get('/supervisors/$supervisorId/students');
+  }
+
+  static Future<Map<String, dynamic>?> getSupervisorDashboardData(
+    int supervisorId,
+  ) async {
+    return get('/supervisors/$supervisorId/dashboard');
   }
 
   // Generic HTTP Methods

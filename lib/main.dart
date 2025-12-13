@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 // import 'package:hive_flutter/hive_flutter.dart';
 import 'package:siwes360/providers/theme_provider.dart';
 import 'package:siwes360/themes/theme.dart';
+import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/splash_screen.dart';
 // import 'request.dart';
 // import 'providers/theme_provider.dart';
@@ -18,22 +21,22 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // try {
-  //   // Initialize Hive
-  //   await Hive.initFlutter();
-  //   print('Hive initialized successfully');
+  try {
+    // Initialize Hive
+    await Hive.initFlutter();
+    print('Hive initialized successfully');
 
-  //   // Initialize Request Service
-  //   RequestService.initialize();
-  //   print('RequestService initialized successfully');
+    // Initialize Request Service
+    RequestService.initialize();
+    print('RequestService initialized successfully');
 
-  //   // Load any saved auth token
-  //   await RequestService.loadAuthToken();
-  //   print('Auth token loading completed');
+    // Load any saved auth token
+    await RequestService.loadAuthToken();
+    print('Auth token loading completed');
 
-  // } catch (e) {
-  //   print('Initialization error: $e');
-  // }
+  } catch (e) {
+    print('Initialization error: $e');
+  }
 
   runApp(
     MultiProvider(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:siwes360/auth/login.dart';
 import 'package:siwes360/screens/student/editStudentProfile.dart';
 import 'package:siwes360/screens/student/studentSettings.dart';
 import 'package:siwes360/widgets/studentbottomNavBar.dart';
@@ -25,9 +26,10 @@ class _StudentProfileState extends State<StudentProfile> {
             ),
             ElevatedButton(
               onPressed: () {
-                // Add logout logic here
-                Navigator.pop(context);
-                // Navigate to login page
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const Login()),
+                );
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               child: const Text(

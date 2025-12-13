@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
 import 'package:siwes360/screens/student/studentNotifications.dart';
+import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/studentbottomNavBar.dart';
 
 class StudentDashboard extends StatefulWidget {
@@ -11,375 +13,725 @@ class StudentDashboard extends StatefulWidget {
 }
 
 class _StudentDashboardState extends State<StudentDashboard> {
+  bool _isLoading = true;
+  Map<String, dynamic>? _dashboardData;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+  }
+
+  Future<void> _loadDashboardData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      // Load user data from local storage
+      final userData = await RequestService.loadUserData();
+
+      if (userData == null || userData['role_data'] == null) {
+        setState(() {
+          _errorMessage = 'User data not found. Please login again.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final studentId = userData['role_data']['user_id'];
+
+      // Fetch dashboard data from API
+      final result = await RequestService.getStudentDashboardData(studentId);
+
+      if (result != null && result['status'] == 'success') {
+        setState(() {
+          _dashboardData = result['data'];
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = result?['message'] ?? 'Failed to load dashboard data';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading dashboard: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
+  }
+
+  String _formatDate(String? dateStr) {
+    if (dateStr == null) return 'Not set';
+    try {
+      final date = DateTime.parse(dateStr);
+      return DateFormat('MMM dd, yyyy').format(date);
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
+  String _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return 'green';
+      case 'pending':
+        return 'orange';
+      case 'rejected':
+        return 'red';
+      default:
+        return 'grey';
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Icons.check_circle;
+      case 'pending':
+        return Icons.access_time;
+      case 'rejected':
+        return Icons.cancel;
+      default:
+        return Icons.help_outline;
+    }
+  }
+
+  Color _getColorFromString(String colorName) {
+    switch (colorName) {
+      case 'green':
+        return Colors.green;
+      case 'orange':
+        return Colors.orange;
+      case 'red':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // backgroundColor: Colors.grey[100],
-      body: SafeArea(
-        child: SingleChildScrollView(
+    if (_isLoading) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Color(0xFF0A3D62)),
+              const SizedBox(height: 16),
+              Text(
+                'Loading dashboard...',
+                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Scaffold(
+        body: Center(
           child: Padding(
-            padding: const EdgeInsets.only(
-              top: 15.0,
-              left: 20.0,
-              right: 20.0,
-              bottom: 20.0,
-            ),
+            padding: const EdgeInsets.all(24.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
+                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _loadDashboardData,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0A3D62),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 12,
+                    ),
+                  ),
+                  child: const Text(
+                    'Retry',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final student = _dashboardData?['student'];
+    final supervisor = _dashboardData?['supervisor'];
+    final progress = _dashboardData?['progress'];
+    final recentLogs = _dashboardData?['recent_logs'] ?? [];
+    final stats = _dashboardData?['statistics'];
+
+    return Scaffold(
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _loadDashboardData,
+          color: const Color(0xFF0A3D62),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.only(
+                top: 15.0,
+                left: 20.0,
+                right: 20.0,
+                bottom: 20.0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 25,
+                            backgroundColor: const Color(0xFF0A3D62),
+                            child: Text(
+                              (student?['full_name'] ?? 'U')
+                                  .substring(0, 1)
+                                  .toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Dashboard',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Stack(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.notifications_outlined),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const StudentNotifications(),
+                                ),
+                              );
+                            },
+                          ),
+                          if ((stats?['pending_logs'] ?? 0) > 0)
+                            Positioned(
+                              right: 8,
+                              top: 8,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Welcome Message
+                  Text(
+                    'Hello, ${student?['full_name']?.split(' ')[0] ?? 'Student'}!',
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Keep up the great work on your internship.',
+                    style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 30),
+
+                  // Progress Card
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 25,
-                          backgroundImage: AssetImage(
-                            'assets/images/avatar.jpeg',
+                        Text(
+                          'OVERVIEW',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            letterSpacing: 1,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(height: 8),
                         const Text(
-                          'Dashboard',
+                          'Internship Progress',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
-                    ),
-                    Stack(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.notifications_outlined),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const StudentNotifications(),
-                              ),
-                            );
-                          },
-                        ),
-                        Positioned(
-                          right: 8,
-                          top: 8,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
+                        const SizedBox(height: 30),
+                        Center(
+                          child: SizedBox(
+                            width: 150,
+                            height: 150,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 150,
+                                  height: 150,
+                                  child: CircularProgressIndicator(
+                                    value: (progress?['percentage'] ?? 0) / 100,
+                                    strokeWidth: 12,
+                                    backgroundColor: Colors.grey[300],
+                                    valueColor:
+                                        const AlwaysStoppedAnimation<Color>(
+                                          Color(0xFF0A3D62),
+                                        ),
+                                  ),
+                                ),
+                                Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      '${progress?['percentage'] ?? 0}%',
+                                      style: const TextStyle(
+                                        fontSize: 36,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Completed',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ),
+                        const SizedBox(height: 30),
+                        Text(
+                          'End Date: ${_formatDate(student?['internship_end_date'])}',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
                       ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-
-                const Text(
-                  'Hello, Mofiyinfoluwa!',
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Keep up the great work on your internship.',
-                  style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 30),
-
-                // Progress Card
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 20),
+
+                  // Days Stats
+                  Row(
                     children: [
-                      Text(
-                        'OVERVIEW',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Internship Progress',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 30),
-                      Center(
-                        child: SizedBox(
-                          width: 150,
-                          height: 150,
-                          child: Stack(
-                            alignment: Alignment.center,
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              SizedBox(
-                                width: 150,
-                                height: 150,
-                                child: CircularProgressIndicator(
-                                  value: 0.65,
-                                  strokeWidth: 12,
-                                  backgroundColor: Colors.grey[300],
-                                  valueColor:
-                                      const AlwaysStoppedAnimation<Color>(
-                                        Color(0xFF0A3D62),
-                                      ),
+                              Text(
+                                'Days Completed',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
                                 ),
                               ),
-                              Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Text(
-                                    '65%',
-                                    style: TextStyle(
-                                      fontSize: 36,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Completed',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
+                              const SizedBox(height: 8),
+                              Text(
+                                '${progress?['daysCompleted'] ?? 0}',
+                                style: const TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 30),
-                      Text(
-                        'End Date: Aug 31, 2025',
-                        style: TextStyle(color: Colors.grey[600]),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Days Remaining',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${progress?['daysRemaining'] ?? 0}',
+                                style: const TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 20),
+                  const SizedBox(height: 20),
 
-                Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
+                  // Write Log Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AddNewLogEntry(),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0A3D62),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Days Completed',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
-                              ),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.edit_outlined, color: Colors.white),
+                          SizedBox(width: 8),
+                          Text(
+                            'Write New Log Entry',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
                             ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              '110',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+
+                  // Recent Entries
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Recent Entries',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          // Navigate to all logs
+                        },
+                        child: const Text(
+                          'View All',
+                          style: TextStyle(color: Color(0xFF0A3D62)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Entry Cards
+                  if (recentLogs.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(32),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.note_add_outlined,
+                              size: 48,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No log entries yet',
                               style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.grey[600],
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Days Remaining',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              '70',
-                              style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
+                    )
+                  else
+                    ...recentLogs.take(3).map((log) {
+                      final statusColor = _getStatusColor(
+                        log['status'] ?? 'pending',
+                      );
+                      final statusIcon = _getStatusIcon(
+                        log['status'] ?? 'pending',
+                      );
 
-                // Write Log Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      // Change from pushReplacement to push
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const AddNewLogEntry(),
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildEntryCard(
+                          log['description'] ?? 'No description',
+                          _formatDate(log['log_date']),
+                          log['status'] ?? 'pending',
+                          _getColorFromString(statusColor),
+                          statusIcon,
                         ),
                       );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF0A3D62),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.edit_outlined, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text(
-                          'Write New Log Entry',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
+                    }).toList(),
+
+                  const SizedBox(height: 30),
+
+                  // Supervisor Section
+                  const Text(
+                    'Supervisor',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // // ADDED: Show supervisor source indicator
+                  // if (_dashboardData?['supervisor_source'] != null)
+                  //   Container(
+                  //     margin: const EdgeInsets.only(bottom: 12),
+                  //     padding: const EdgeInsets.symmetric(
+                  //       horizontal: 12,
+                  //       vertical: 8,
+                  //     ),
+                  //     decoration: BoxDecoration(
+                  //       color:
+                  //           _dashboardData!['supervisor_source'] == 'database'
+                  //           ? Colors.green[50]
+                  //           : Colors.orange[50],
+                  //       borderRadius: BorderRadius.circular(8),
+                  //       border: Border.all(
+                  //         color:
+                  //             _dashboardData!['supervisor_source'] == 'database'
+                  //             ? Colors.green[200]!
+                  //             : Colors.orange[200]!,
+                  //       ),
+                  //     ),
+                  //     child: Row(
+                  //       children: [
+                  //         Icon(
+                  //           _dashboardData!['supervisor_source'] == 'database'
+                  //               ? Icons.link
+                  //               : Icons.edit_note,
+                  //           size: 16,
+                  //           color:
+                  //               _dashboardData!['supervisor_source'] ==
+                  //                   'database'
+                  //               ? Colors.green[700]
+                  //               : Colors.orange[700],
+                  //         ),
+                  //         const SizedBox(width: 8),
+                  //         Expanded(
+                  //           child: Text(
+                  //             _dashboardData!['supervisor_source'] == 'database'
+                  //                 ? 'Linked from database - Can approve logs'
+                  //                 : 'Manually entered - Cannot approve logs yet',
+                  //             style: TextStyle(
+                  //               fontSize: 12,
+                  //               color:
+                  //                   _dashboardData!['supervisor_source'] ==
+                  //                       'database'
+                  //                   ? Colors.green[700]
+                  //                   : Colors.orange[700],
+                  //               fontWeight: FontWeight.w600,
+                  //             ),
+                  //           ),
+                  //         ),
+                  //       ],
+                  //     ),
+                  //   ),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
                         ),
                       ],
                     ),
-                  ),
-                ),
-                const SizedBox(height: 30),
-
-                // Recent Entries
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Recent Entries',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {},
-                      child: const Text(
-                        'View All',
-                        style: TextStyle(color: Color(0xFF0A3D62)),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Entry Cards
-                _buildEntryCard(
-                  'Week 8: Project Implementation',
-                  'July 15, 2025',
-                  'Approved',
-                  Colors.green,
-                  Icons.check_circle,
-                ),
-                const SizedBox(height: 12),
-                _buildEntryCard(
-                  'Week 9: User Testing Phase',
-                  'July 22, 2025',
-                  'Pending',
-                  Colors.orange,
-                  Icons.access_time,
-                ),
-                const SizedBox(height: 30),
-
-                // Supervisor Section
-                const Text(
-                  'Supervisor',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      const CircleAvatar(
-                        radius: 30,
-                        backgroundImage: AssetImage(
-                          'assets/images/avatar2.jpeg',
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Dr. Emmanuel Franklyn',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                    child: supervisor != null
+                        ? Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 30,
+                                backgroundColor: const Color(0xFF0A3D62),
+                                child: Text(
+                                  (supervisor['full_name'] ?? 'S')
+                                      .substring(0, 1)
+                                      .toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      supervisor['full_name'] ?? 'Not Assigned',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      supervisor['position'] ??
+                                          'Industry Supervisor',
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    if (supervisor['organization'] != null)
+                                      Text(
+                                        supervisor['organization'],
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    // ADDED: Show contact info if available
+                                    if (supervisor['email'] != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Text(
+                                          supervisor['email'],
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (supervisor['user_id'] != null)
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF0A3D62),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.chat_bubble_outline,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                ),
+                            ],
+                          )
+                        : Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.person_off_outlined,
+                                    size: 48,
+                                    color: Colors.grey[400],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'No supervisor assigned yet',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Industry Supervisor',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0A3D62),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.chat_bubble_outline,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                    ],
+                          ),
                   ),
-                ),
-                const SizedBox(height: 20),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ),
-      bottomNavigationBar: BottomNavBar(currentIndex: 0),
+      bottomNavigationBar: const BottomNavBar(currentIndex: 0),
     );
   }
 
@@ -395,6 +747,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -417,6 +776,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -427,8 +788,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
             ),
           ),
           Text(
-            status,
-            style: TextStyle(color: statusColor, fontWeight: FontWeight.w600),
+            status.toUpperCase(),
+            style: TextStyle(
+              color: statusColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
           ),
         ],
       ),
