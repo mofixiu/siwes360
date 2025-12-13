@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:siwes360/auth/forgotPassword.dart';
 import 'package:siwes360/auth/signup.dart';
 import 'package:siwes360/screens/student/studentDashboard.dart';
+import 'package:siwes360/screens/supervisor/supervisorDashboard.dart';
 import 'package:siwes360/themes/theme.dart';
 import 'package:siwes360/widgets/customButton.dart';
 // import 'package:provider/provider.dart';
@@ -90,7 +91,7 @@ class _LoginState extends State<Login> {
                   ),
                 ),
                 SizedBox(height: MediaQuery.of(context).size.height * 0.03),
-      
+
                 // Email Field
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -157,9 +158,9 @@ class _LoginState extends State<Login> {
                     ),
                   ),
                 ),
-      
+
                 SizedBox(height: MediaQuery.of(context).size.height * 0.02),
-      
+
                 // Password Field
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -233,7 +234,7 @@ class _LoginState extends State<Login> {
                     ),
                   ),
                 ),
-      
+
                 // Login Button
                 Padding(
                   padding: const EdgeInsets.all(20.0),
@@ -242,24 +243,27 @@ class _LoginState extends State<Login> {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => StudentDashboard(),
+                          builder: (context) => SupervisorDashboard(),
+                          // builder: (context) => StudentDashboard()
                         ),
                       );
                     },
                     data: _isLoading ? "Logging in..." : "Login",
                     textcolor: Colors.white,
-                    backgroundcolor: _isLoading ? Colors.grey : Color(0xFF0A3D62),
+                    backgroundcolor: _isLoading
+                        ? Colors.grey
+                        : Color(0xFF0A3D62),
                     width: MediaQuery.of(context).size.width,
                     height: 50,
                   ),
                 ),
-      
+
                 if (_isLoading)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: CircularProgressIndicator(color: Color(0xFF0A3D62)),
                   ),
-      
+
                 SizedBox(height: MediaQuery.of(context).size.height * 0.003),
                 GestureDetector(
                   onTap: () {
@@ -278,7 +282,7 @@ class _LoginState extends State<Login> {
                   ),
                 ),
                 SizedBox(height: MediaQuery.of(context).size.height * 0.01),
-      
+
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20.0),
                   child: Row(
@@ -326,7 +330,7 @@ class _LoginState extends State<Login> {
                     height: 50,
                   ),
                 ),
-      
+
                 SizedBox(height: MediaQuery.of(context).size.height * 0.01),
                 Text(
                   "By Continuing, you agree to our",

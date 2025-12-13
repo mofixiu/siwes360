@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/screens/student/editStudentProfile.dart';
 import 'package:siwes360/screens/student/studentSettings.dart';
-import 'package:siwes360/widgets/bottomNavBar.dart';
+import 'package:siwes360/widgets/studentbottomNavBar.dart';
 
 class StudentProfile extends StatefulWidget {
   const StudentProfile({super.key});

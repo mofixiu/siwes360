@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
 import 'package:siwes360/screens/student/studentNotifications.dart';
-import 'package:siwes360/widgets/bottomNavBar.dart';
+import 'package:siwes360/widgets/studentbottomNavBar.dart';
 
 class StudentDashboard extends StatefulWidget {
   const StudentDashboard({super.key});

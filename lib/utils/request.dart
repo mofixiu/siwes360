@@ -1,0 +1,389 @@
+import 'dart:developer';
+import 'dart:convert' as dart_convert;
+import 'dart:io' show Platform;
+import 'package:dio/dio.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+// Platform-specific host configuration
+String get host {
+  if (kIsWeb) {
+    return "http://localhost:3001";
+  } else if (Platform.isAndroid) {
+    // IMPORTANT: Change this to your machine's IP address
+    return "http://10.0.2.2:3001"; // For Android emulator
+    // return "http://192.168.1.XXX:3001"; // For physical device
+  } else if (Platform.isIOS) {
+    return "http://localhost:3001"; // For iOS simulator
+  } else {
+    return "http://localhost:3001";
+  }
+}
+
+String get baseUrl => "$host/api";
+
+class RequestService {
+  static final Dio _dio = Dio();
+  static String? _authToken;
+  static bool _isInitialized = false;
+
+  static void initialize() {
+    if (_isInitialized) return;
+
+    _dio.options.baseUrl = baseUrl;
+    _dio.options.connectTimeout = const Duration(seconds: 30);
+    _dio.options.receiveTimeout = const Duration(seconds: 30);
+
+    // Add interceptors
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          log('REQUEST: ${options.method} ${options.uri}');
+          log('DATA: ${options.data}');
+
+          // Add auth token for protected routes
+          if (_authToken != null) {
+            options.headers['Authorization'] = 'Bearer $_authToken';
+          }
+
+          // Don't override Content-Type for FormData requests
+          if (options.data is! FormData) {
+            options.headers['Content-Type'] = 'application/json';
+          }
+          options.headers['Accept'] = 'application/json';
+
+          handler.next(options);
+        },
+        onResponse: (response, handler) {
+          log(
+            'RESPONSE: ${response.statusCode} ${response.requestOptions.uri}',
+          );
+          log('RESPONSE DATA: ${response.data}');
+          handler.next(response);
+        },
+        onError: (error, handler) {
+          log('ERROR: ${error.message}');
+          log('ERROR RESPONSE: ${error.response?.data}');
+          handler.next(error);
+        },
+      ),
+    );
+
+    _isInitialized = true;
+    log('RequestService initialized with baseUrl: $baseUrl');
+  }
+
+  static bool get isInitialized => _isInitialized;
+
+  // Auth Methods
+  static Future<Map<String, dynamic>?> login(
+    String email,
+    String password,
+  ) async {
+    return post('/auth/login', {'email': email, 'password': password});
+  }
+
+  static Future<Map<String, dynamic>?> register(
+    Map<String, dynamic> userData,
+  ) async {
+    return post('/auth/register', userData);
+  }
+
+  static Future<Map<String, dynamic>?> getProfile() async {
+    return get('/auth/profile');
+  }
+
+  // Daily Log Methods
+  static Future<Map<String, dynamic>?> createDailyLog(
+    Map<String, dynamic> logData,
+  ) async {
+    return post('/logs', logData);
+  }
+
+  static Future<Map<String, dynamic>?> getStudentDailyLogs(
+    int studentId,
+  ) async {
+    return get('/logs/student/$studentId');
+  }
+
+  static Future<Map<String, dynamic>?> approveDailyLog(
+    int logId,
+    String comment,
+  ) async {
+    return put('/logs/$logId/approve', {'supervisor_comment': comment});
+  }
+
+  static Future<Map<String, dynamic>?> rejectDailyLog(
+    int logId,
+    String comment,
+  ) async {
+    return put('/logs/$logId/reject', {'supervisor_comment': comment});
+  }
+
+  static Future<Map<String, dynamic>?> updateDailyLog(
+    int logId,
+    Map<String, dynamic> data,
+  ) async {
+    return patch('/logs/$logId', data);
+  }
+
+  static Future<Map<String, dynamic>?> deleteDailyLog(int logId) async {
+    return delete('/logs/$logId');
+  }
+
+  // Generic HTTP Methods
+  static Future<Map<String, dynamic>?> post(
+    String path,
+    Map<String, dynamic> data,
+  ) async {
+    if (!_isInitialized) {
+      initialize();
+    }
+
+    try {
+      log('Making POST request to: $path');
+      final response = await _dio.post(path, data: data);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (response.data is Map<String, dynamic>) {
+          return response.data as Map<String, dynamic>;
+        } else if (response.data is String) {
+          try {
+            final Map<String, dynamic> parsed = Map<String, dynamic>.from(
+              dart_convert.jsonDecode(response.data),
+            );
+            return parsed;
+          } catch (e) {
+            log('Failed to parse string response as JSON: $e');
+            return {
+              'status': 'error',
+              'message': 'Invalid response format',
+              'data': response.data,
+            };
+          }
+        } else {
+          return {'status': 'success', 'data': response.data};
+        }
+      }
+
+      return {
+        'status': 'error',
+        'message': 'Request failed with status: ${response.statusCode}',
+      };
+    } on DioException catch (e) {
+      log('DioException: ${e.message}');
+      if (e.response != null) {
+        log('Error response: ${e.response!.data}');
+        return {
+          'status': 'error',
+          'message': e.response!.data['message'] ?? 'Request failed',
+          'data': e.response!.data,
+        };
+      }
+      return {'status': 'error', 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      log('General error: $e');
+      return {'status': 'error', 'message': 'Unexpected error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>?> get(String path) async {
+    if (!_isInitialized) {
+      initialize();
+    }
+
+    try {
+      final response = await _dio.get(path);
+
+      if (response.statusCode == 200) {
+        if (response.data is Map<String, dynamic>) {
+          return response.data as Map<String, dynamic>;
+        }
+      }
+
+      return {
+        'status': 'error',
+        'message': 'Request failed with status: ${response.statusCode}',
+      };
+    } on DioException catch (e) {
+      log('DioException: ${e.message}');
+      if (e.response != null) {
+        log('Error response: ${e.response!.data}');
+        return {
+          'status': 'error',
+          'message': e.response!.data['message'] ?? 'Request failed',
+          'data': e.response!.data,
+        };
+      }
+      return {'status': 'error', 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      log('General error: $e');
+      return {'status': 'error', 'message': 'Unexpected error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>?> patch(
+    String path,
+    Map<String, dynamic> data,
+  ) async {
+    if (!_isInitialized) {
+      initialize();
+    }
+
+    try {
+      log('Making PATCH request to: $path');
+      final response = await _dio.patch(path, data: data);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (response.data is Map<String, dynamic>) {
+          return response.data as Map<String, dynamic>;
+        }
+      }
+
+      return {
+        'status': 'error',
+        'message': 'Request failed with status: ${response.statusCode}',
+      };
+    } on DioException catch (e) {
+      log('PATCH DioException: ${e.message}');
+      if (e.response != null) {
+        log('Error response: ${e.response!.data}');
+        return {
+          'status': 'error',
+          'message': e.response!.data['message'] ?? 'Request failed',
+          'data': e.response!.data,
+        };
+      }
+      return {'status': 'error', 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      log('PATCH General error: $e');
+      return {'status': 'error', 'message': 'Unexpected error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>?> put(
+    String path,
+    Map<String, dynamic> data,
+  ) async {
+    if (!_isInitialized) {
+      initialize();
+    }
+
+    try {
+      log('Making PUT request to: $path');
+      log('PUT data: $data');
+
+      final response = await _dio.put(path, data: data);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        log('PUT response: ${response.data}');
+        if (response.data is Map<String, dynamic>) {
+          return response.data as Map<String, dynamic>;
+        }
+        return {'status': 'success', 'data': response.data};
+      }
+
+      return {
+        'status': 'error',
+        'message': 'Request failed with status: ${response.statusCode}',
+      };
+    } on DioException catch (e) {
+      log('PUT DioException: ${e.message}');
+      if (e.response != null) {
+        log('PUT Error response: ${e.response!.data}');
+        return {
+          'status': 'error',
+          'message': e.response!.data['message'] ?? 'Request failed',
+          'data': e.response!.data,
+        };
+      }
+      return {'status': 'error', 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      log('PUT General error: $e');
+      return {'status': 'error', 'message': 'Unexpected error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>?> delete(String path) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('RequestService not initialized');
+      }
+
+      log('DELETE Request to: $baseUrl$path');
+      final response = await _dio.delete(path);
+
+      log('DELETE Response: ${response.data}');
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return {'status': 'success', 'data': response.data};
+    } catch (e) {
+      log('DELETE Error: $e');
+      return {'status': 'error', 'message': 'Delete failed: $e'};
+    }
+  }
+
+  static Future<void> setAuthToken(String token) async {
+    try {
+      _authToken = token;
+      final box = await Hive.openBox('auth');
+      await box.put('token', token);
+      log('Auth token saved');
+    } catch (e) {
+      log('Error setting auth token: $e');
+    }
+  }
+
+  static Future<void> loadAuthToken() async {
+    try {
+      final box = await Hive.openBox('auth');
+      _authToken = box.get('token');
+      if (_authToken != null) {
+        log('Auth token loaded from storage');
+      } else {
+        log('No auth token found in storage');
+      }
+    } catch (e) {
+      log('Error loading auth token: $e');
+    }
+  }
+
+  static Future<void> clearAuthToken() async {
+    try {
+      _authToken = null;
+      final box = await Hive.openBox('auth');
+      await box.delete('token');
+      await box.delete('user_data');
+      log('Auth token cleared');
+    } catch (e) {
+      log('Error clearing auth token: $e');
+    }
+  }
+
+  static Future<void> saveUserData(Map<String, dynamic> userData) async {
+    try {
+      final box = await Hive.openBox('auth');
+      await box.put('user_data', dart_convert.jsonEncode(userData));
+      log('User data saved');
+    } catch (e) {
+      log('Error saving user data: $e');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> loadUserData() async {
+    try {
+      final box = await Hive.openBox('auth');
+      final userDataString = box.get('user_data');
+      if (userDataString != null) {
+        return Map<String, dynamic>.from(
+          dart_convert.jsonDecode(userDataString),
+        );
+      }
+      return null;
+    } catch (e) {
+      log('Error loading user data: $e');
+      return null;
+    }
+  }
+}
