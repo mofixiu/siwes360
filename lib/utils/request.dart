@@ -1,9 +1,10 @@
 import 'dart:developer';
 import 'dart:convert' as dart_convert;
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
 import 'package:dio/dio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http_parser/http_parser.dart';
 
 // Platform-specific host configuration
 String get host {
@@ -132,15 +133,130 @@ class RequestService {
 
   // Daily Log Methods
   static Future<Map<String, dynamic>?> createDailyLog(
-    Map<String, dynamic> logData,
-  ) async {
-    return post('/logs', logData);
+    Map<String, dynamic> logData, {
+    List<File>? attachments,
+  }) async {
+    try {
+      if (!isInitialized) {
+        throw Exception('RequestService not initialized');
+      }
+
+      // Create FormData with explicit boundary
+      Map<String, dynamic> formFields = {};
+
+      // Ensure all fields are strings
+      logData.forEach((key, value) {
+        if (value != null) {
+          formFields[key] = value.toString();
+        }
+      });
+
+      FormData formData = FormData.fromMap(formFields);
+
+      // Add file attachments if any
+      if (attachments != null && attachments.isNotEmpty) {
+        log('Processing ${attachments.length} attachments');
+
+        for (int i = 0; i < attachments.length; i++) {
+          var file = attachments[i];
+          String fileName = file.path.split('/').last;
+          String fileExtension = fileName.split('.').last.toLowerCase();
+
+          log('Processing file $i: $fileName (${await file.length()} bytes)');
+
+          // Determine MIME type
+          String mimeType = 'application/octet-stream';
+          if (['jpg', 'jpeg'].contains(fileExtension)) {
+            mimeType = 'image/jpeg';
+          } else if (fileExtension == 'png') {
+            mimeType = 'image/png';
+          } else if (fileExtension == 'pdf') {
+            mimeType = 'application/pdf';
+          } else if (fileExtension == 'docx') {
+            mimeType =
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          } else if (fileExtension == 'doc') {
+            mimeType = 'application/msword';
+          } else if (fileExtension == 'xlsx') {
+            mimeType =
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          } else if (fileExtension == 'xls') {
+            mimeType = 'application/vnd.ms-excel';
+          }
+
+          // Read file as bytes
+          final bytes = await file.readAsBytes();
+          log('Read ${bytes.length} bytes from file');
+
+          // Add to FormData using MultipartFile.fromBytes
+          formData.files.add(
+            MapEntry(
+              'attachments',
+              MultipartFile.fromBytes(
+                bytes,
+                filename: fileName,
+                contentType: MediaType.parse(mimeType),
+              ),
+            ),
+          );
+
+          log('Added file to FormData: $fileName');
+        }
+      }
+
+      log('Creating daily log with ${formData.files.length} attachments');
+      log('Form fields: ${formFields.keys.join(", ")}');
+
+      // Make request with explicit headers
+      final response = await _dio.post(
+        '/logs',
+        data: formData,
+        options: Options(
+          headers: {'Accept': 'application/json'},
+          contentType: 'multipart/form-data',
+          validateStatus: (status) {
+            // Accept all status codes to handle errors gracefully
+            return status != null && status < 600;
+          },
+          sendTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(seconds: 60),
+        ),
+      );
+
+      log('Daily log response status: ${response.statusCode}');
+      log('Daily log response: ${response.data}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (response.data is Map<String, dynamic>) {
+          return response.data as Map<String, dynamic>;
+        }
+        return {'status': 'success', 'data': response.data};
+      } else {
+        // Handle error responses
+        String errorMessage = 'Failed to create log';
+        if (response.data is Map && response.data['message'] != null) {
+          errorMessage = response.data['message'];
+        }
+        return {'status': 'error', 'message': errorMessage};
+      }
+    } catch (e, stackTrace) {
+      log('Create daily log error: $e');
+      log('Stack trace: $stackTrace');
+      return {
+        'status': 'error',
+        'message': 'Failed to create log: ${e.toString()}',
+      };
+    }
   }
 
   static Future<Map<String, dynamic>?> getStudentDailyLogs(
     int studentId,
   ) async {
     return get('/logs/student/$studentId');
+  }
+
+  static Future<Map<String, dynamic>?> getDailyLogById(int logId) async {
+    return get('/logs/$logId');
   }
 
   static Future<Map<String, dynamic>?> approveDailyLog(

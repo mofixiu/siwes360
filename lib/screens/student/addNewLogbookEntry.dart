@@ -1,7 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:siwes360/themes/theme.dart';
-import 'package:siwes360/widgets/file_picker_widget.dart';
+import 'package:siwes360/utils/request.dart';
 
 class AddNewLogEntry extends StatefulWidget {
   const AddNewLogEntry({super.key});
@@ -20,6 +21,7 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
   DateTime _selectedDate = DateTime.now();
   List<PlatformFile> _attachedFiles = [];
   bool _isLoading = false;
+  AutovalidateMode _autovalidateMode = AutovalidateMode.disabled; // ADD THIS
 
   @override
   void initState() {
@@ -82,10 +84,50 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
     }
   }
 
-  void _onFilesSelected(List<PlatformFile> files) {
-    setState(() {
-      _attachedFiles.addAll(files);
-    });
+  Future<void> _pickFiles() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: [
+          'pdf',
+          'doc',
+          'docx',
+          'jpg',
+          'jpeg',
+          'png',
+          'xls',
+          'xlsx',
+        ],
+      );
+
+      if (result != null) {
+        // Check total size
+        int totalSize = result.files.fold(0, (sum, file) => sum + (file.size));
+        if (totalSize > 10 * 1024 * 1024) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Total file size exceeds 10MB limit'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+
+        setState(() {
+          _attachedFiles.addAll(result.files);
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error picking files: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _removeFile(int index) {
@@ -100,67 +142,177 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  IconData _getFileIcon(String fileName) {
-    final extension = fileName.toLowerCase();
-    if (extension.endsWith('.pdf')) return Icons.picture_as_pdf;
-    if (extension.endsWith('.doc') || extension.endsWith('.docx')) {
-      return Icons.description;
+  IconData _getFileIcon(String filename) {
+    final extension = filename.split('.').last.toLowerCase();
+    switch (extension) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'doc':
+      case 'docx':
+        return Icons.description;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Icons.image;
+      default:
+        return Icons.insert_drive_file;
     }
-    if (extension.endsWith('.png') ||
-        extension.endsWith('.jpg') ||
-        extension.endsWith('.jpeg')) {
-      return Icons.image;
-    }
-    if (extension.endsWith('.xls') || extension.endsWith('.xlsx')) {
-      return Icons.table_chart;
-    }
-    if (extension.endsWith('.ppt') || extension.endsWith('.pptx')) {
-      return Icons.slideshow;
-    }
-    return Icons.insert_drive_file;
   }
 
-  Color _getFileIconColor(String fileName) {
-    final extension = fileName.toLowerCase();
-    if (extension.endsWith('.pdf')) return Colors.red;
-    if (extension.endsWith('.doc') || extension.endsWith('.docx')) {
-      return Colors.blue;
+  Color _getFileIconColor(String filename) {
+    final extension = filename.split('.').last.toLowerCase();
+    switch (extension) {
+      case 'pdf':
+        return Colors.red;
+      case 'doc':
+      case 'docx':
+        return Colors.blue;
+      case 'xls':
+      case 'xlsx':
+        return Colors.green;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
-    if (extension.endsWith('.png') ||
-        extension.endsWith('.jpg') ||
-        extension.endsWith('.jpeg')) {
-      return Colors.blue;
-    }
-    if (extension.endsWith('.xls') || extension.endsWith('.xlsx')) {
-      return Colors.green;
-    }
-    if (extension.endsWith('.ppt') || extension.endsWith('.pptx')) {
-      return Colors.orange;
-    }
-    return Colors.grey;
   }
 
-  Future<void> _saveEntry() async {
-    if (_formKey.currentState!.validate()) {
+  Future<void> _submitLog() async {
+    print('=== Submit Log Called ===');
+
+    if (!_formKey.currentState!.validate()) {
+      print('Form validation failed');
+      
+      // Enable auto-validation after first failed attempt
       setState(() {
-        _isLoading = true;
+        _autovalidateMode = AutovalidateMode.onUserInteraction;
       });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please fill in all required fields correctly'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
 
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 2));
+    print('Form validated successfully');
 
-      setState(() {
-        _isLoading = false;
-      });
+    setState(() {
+      _isLoading = true;
+    });
 
-      if (mounted) {
+    try {
+      // Get student ID from stored user data
+      print('Loading user data...');
+      final userData = await RequestService.loadUserData();
+      print('User data loaded: ${userData != null}');
+
+      if (userData == null || userData['role_data'] == null) {
+        throw Exception('User data not found');
+      }
+
+      final studentId = userData['role_data']['user_id'];
+      print('Student ID: $studentId');
+
+      // Prepare log data
+      final logData = {
+        'student_id': studentId,
+        'log_date': _selectedDate.toIso8601String().split('T')[0],
+        'description': _activitiesController.text.trim(),
+        'skills_acquired': _skillsController.text.trim().isNotEmpty
+            ? _skillsController.text.trim()
+            : null,
+        'challenges_faced': _challengesController.text.trim().isNotEmpty
+            ? _challengesController.text.trim()
+            : null,
+      };
+
+      print('Log data prepared: $logData');
+
+      // Convert PlatformFile to File for upload
+      List<File>? fileAttachments;
+      if (_attachedFiles.isNotEmpty) {
+        print('Processing ${_attachedFiles.length} attachments...');
+        fileAttachments = _attachedFiles
+            .where((file) => file.path != null)
+            .map((file) => File(file.path!))
+            .toList();
+        print('Converted ${fileAttachments.length} files');
+      } else {
+        print('No attachments to process');
+      }
+
+      // Create log with attachments
+      print('Calling createDailyLog API...');
+      final result = await RequestService.createDailyLog(
+        logData,
+        attachments: fileAttachments,
+      );
+
+      print('API Response: $result');
+
+      if (!mounted) {
+        print('Widget not mounted, returning');
+        return;
+      }
+
+      if (result != null && result['status'] == 'success') {
+        print('Log created successfully!');
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Logbook entry saved successfully!'),
+            content: Text('Log entry created successfully!'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context);
+
+        // Clear form
+        _activitiesController.clear();
+        _skillsController.clear();
+        _challengesController.clear();
+        setState(() {
+          _attachedFiles.clear();
+          _selectedDate = DateTime.now();
+          _dateController.text = _formatDate(_selectedDate);
+        });
+
+        // Navigate back with delay to show snackbar
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+          Navigator.pop(context, true);
+        }
+      } else {
+        print('API returned error: ${result?['message']}');
+        throw Exception(result?['message'] ?? 'Failed to create log entry');
+      }
+    } catch (e, stackTrace) {
+      print('=== Error in _submitLog ===');
+      print('Error: $e');
+      print('Stack trace: $stackTrace');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      print('Finally block - setting loading to false');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -168,371 +320,238 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      behavior: HitTestBehavior.opaque, // Ensures the entire area detects taps
       onTap: () {
+        print('GestureDetector tapped - unfocusing');
         FocusScope.of(context).unfocus();
       },
+      behavior: HitTestBehavior.opaque,
       child: Scaffold(
         appBar: AppBar(
           elevation: 0,
-          leading: TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.blue, fontSize: 16),
-            ),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () {
+              print('Back button tapped');
+              Navigator.pop(context);
+            },
           ),
-          leadingWidth: 80,
           title: const Text(
-            'New Logbook Entry',
+            'New Log Entry',
             style: TextStyle(
               color: Colors.black,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          centerTitle: true,
         ),
         body: Form(
           key: _formKey,
+          autovalidateMode: _autovalidateMode, // ADD THIS
           child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(height: 1, color: Colors.grey[200]),
-                const SizedBox(height: 20),
-
-                // Date Section
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Date',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _dateController,
-                        readOnly: true,
-                        onTap: _selectDate,
-                        decoration: InputDecoration(
-                          hintText: 'Select date',
-                          suffixIcon: const Icon(
-                            Icons.calendar_today,
-                            size: 20,
-                          ),
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.blue),
-                          ),
-                        ),
-                      ),
-                    ],
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Date Selection
+                  _buildSectionHeader(
+                    'Log Date',
+                    Icons.calendar_today_outlined,
                   ),
-                ),
-                const SizedBox(height: 24),
+                  const SizedBox(height: 12),
+                  _buildDateField(),
+                  const SizedBox(height: 24),
 
-                // Activities Performed
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Activities Performed',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _activitiesController,
-                        maxLines: 5,
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Please describe your activities';
-                          }
-                          return null;
-                        },
-                        decoration: InputDecoration(
-                          hintText: 'Describe the tasks you completed today...',
-                          hintStyle: TextStyle(color: Colors.grey[400]),
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.blue),
-                          ),
-                        ),
-                      ),
-                    ],
+                  // Activities/Tasks Completed
+                  _buildSectionHeader(
+                    'Activities Completed',
+                    Icons.assignment_outlined,
                   ),
-                ),
-                const SizedBox(height: 24),
-
-                // Skills Gained
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Skills Gained',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _skillsController,
-                        maxLines: 5,
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Please describe skills gained';
-                          }
-                          return null;
-                        },
-                        decoration: InputDecoration(
-                          hintText:
-                              'What new technical or soft skills did you learn?',
-                          hintStyle: TextStyle(color: Colors.grey[400]),
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.blue),
-                          ),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 12),
+                  _buildTextField(
+                    controller: _activitiesController,
+                    hint:
+                        'Describe the tasks and activities you worked on today...',
+                    maxLines: 6,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please describe your activities';
+                      }
+                      if (value.trim().length < 20) {
+                        return 'Please provide more details (minimum 20 characters)';
+                      }
+                      return null;
+                    },
                   ),
-                ),
-                const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-                // Challenges Faced
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Challenges Faced',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _challengesController,
-                        maxLines: 5,
-                        decoration: InputDecoration(
-                          hintText:
-                              'Describe any obstacles and how you addressed them.',
-                          hintStyle: TextStyle(color: Colors.grey[400]),
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.blue),
-                          ),
-                        ),
-                      ),
-                    ],
+                  // Skills Acquired
+                  _buildSectionHeader('Skills Acquired', Icons.star_outline),
+                  const SizedBox(height: 12),
+                  _buildTextField(
+                    controller: _skillsController,
+                    hint:
+                        'What new skills or knowledge did you gain? (Optional)',
+                    maxLines: 4,
                   ),
-                ),
-                const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-                // Attachments Section
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Attachments',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black,
+                  // Challenges Faced
+                  _buildSectionHeader(
+                    'Challenges Faced',
+                    Icons.warning_amber_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildTextField(
+                    controller: _challengesController,
+                    hint:
+                        'Describe any challenges or difficulties encountered (Optional)',
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 24),
+
+                  // File Attachments
+                  _buildSectionHeader('Attachments', Icons.attach_file),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: _pickFiles,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 40,
+                        horizontal: 50,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Colors.grey[300]!,
+                          style: BorderStyle.solid,
+                          width: 2,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.cloud_upload_outlined,
+                            size: 48,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Drag & drop files or',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Browse Files',
+                            style: TextStyle(
+                              color: Colors.blue,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Maximum total size: 10MB',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 12,
+                            ),
+                          ),
+                          Text(
+                            'Supported: PDF, DOC, DOCX, JPG, PNG, XLS, XLSX',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
 
-                      // File Upload Area
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 40),
+                  // Attached Files List
+                  if (_attachedFiles.isNotEmpty)
+                    ...List.generate(_attachedFiles.length, (index) {
+                      final file = _attachedFiles[index];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.grey[300]!,
-                            style: BorderStyle.solid,
-                            width: 2,
-                          ),
+                          border: Border.all(color: Colors.grey[300]!),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        child: Row(
                           children: [
-                            FilePickerWidget(
-                              onFilesSelected: _onFilesSelected,
-                              allowMultiple: true,
-                              maxSizeMB: 10,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Drag & drop files or',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: _getFileIconColor(
+                                  file.name,
+                                ).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                _getFileIcon(file.name),
+                                color: _getFileIconColor(file.name),
+                                size: 24,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Browse Files',
-                              style: TextStyle(
-                                color: Colors.blue,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    file.name,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _getFileSize(file.size),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Maximum file size: 10MB',
-                              style: TextStyle(
-                                color: Colors.grey[500],
-                                fontSize: 12,
-                              ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red),
+                              onPressed: () => _removeFile(index),
                             ),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 16),
+                      );
+                    }),
 
-                      // Attached Files List
-                      if (_attachedFiles.isNotEmpty)
-                        ...List.generate(_attachedFiles.length, (index) {
-                          final file = _attachedFiles[index];
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[300]!),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: _getFileIconColor(
-                                      file.name,
-                                    ).withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Icon(
-                                    _getFileIcon(file.name),
-                                    color: _getFileIconColor(file.name),
-                                    size: 24,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        file.name,
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _getFileSize(file.size),
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline),
-                                  color: Colors.red,
-                                  onPressed: () => _removeFile(index),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 30),
+                  const SizedBox(height: 32),
 
-                // Save Button
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: SizedBox(
+                  // Submit Button
+                  SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _saveEntry,
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              print('Submit button tapped!');
+                              print('Is loading: $_isLoading');
+                              _submitLog();
+                            },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Color(0xFF0A3D62),
+                        backgroundColor: const Color(0xFF0A3D62),
                         disabledBackgroundColor: Colors.grey,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -548,7 +567,7 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
                               ),
                             )
                           : const Text(
-                              'Save & Submit Entry',
+                              'Submit Log Entry',
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
@@ -557,12 +576,98 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
                             ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 30),
-              ],
+                  const SizedBox(height: 20),
+                ],
+              ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A3D62).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: const Color(0xFF0A3D62), size: 20),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF0A3D62),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDateField() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: TextFormField(
+        controller: _dateController,
+        readOnly: true,
+        onTap: _selectDate,
+        decoration: InputDecoration(
+          hintText: 'Select date',
+          hintStyle: TextStyle(color: Colors.grey[400]),
+          prefixIcon: const Icon(
+            Icons.calendar_today_outlined,
+            color: Color(0xFF0A3D62),
+          ),
+          suffixIcon: Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
+        ),
+        validator: (value) {
+          if (value == null || value.isEmpty) {
+            return 'Please select a date';
+          }
+          return null;
+        },
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hint,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: TextFormField(
+        controller: controller,
+        maxLines: maxLines,
+        validator: validator,
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.all(16),
+        ),
+        style: const TextStyle(fontSize: 15),
       ),
     );
   }

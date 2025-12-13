@@ -23,6 +23,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
     _loadDashboardData();
   }
 
+  int _parseStatValue(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
   Future<void> _loadDashboardData() async {
     setState(() {
       _isLoading = true;
@@ -238,7 +245,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                               );
                             },
                           ),
-                          if ((stats?['pending_logs'] ?? 0) > 0)
+                          if (_parseStatValue(stats?['pending_logs']) > 0)
                             Positioned(
                               right: 8,
                               top: 8,
@@ -725,6 +732,53 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             ),
                           ),
                   ),
+
+                  const SizedBox(height: 30),
+
+                  // Statistics Cards
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          'Total Logs',
+                          _parseStatValue(stats?['total_logs']).toString(),
+                          Icons.description_outlined,
+                          Colors.blue,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatCard(
+                          'Approved',
+                          _parseStatValue(stats?['approved_logs']).toString(),
+                          Icons.check_circle_outline,
+                          Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          'Pending',
+                          _parseStatValue(stats?['pending_logs']).toString(),
+                          Icons.pending_outlined,
+                          Colors.orange,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatCard(
+                          'Rejected',
+                          _parseStatValue(stats?['rejected_logs']).toString(),
+                          Icons.cancel_outlined,
+                          Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -793,6 +847,64 @@ class _StudentDashboardState extends State<StudentDashboard> {
               color: statusColor,
               fontWeight: FontWeight.w600,
               fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
