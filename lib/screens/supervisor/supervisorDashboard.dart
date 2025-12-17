@@ -5,6 +5,8 @@ import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
 import 'package:siwes360/screens/supervisor/supervisorNotifications.dart';
+import 'package:siwes360/screens/supervisor/logbookEntryDetail.dart';
+import 'package:siwes360/screens/supervisor/simpleLogbookEntryDetail.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 class SupervisorDashboard extends StatefulWidget {
@@ -584,7 +586,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
         children: [
           // Student Avatar
           Container(
-            height: 120, // Reduced from 140
+            height: 120,
             decoration: BoxDecoration(
               color: const Color(0xFF0A3D62).withOpacity(0.1),
               borderRadius: const BorderRadius.vertical(
@@ -593,7 +595,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             ),
             child: Center(
               child: CircleAvatar(
-                radius: 40, // Reduced from 50
+                radius: 40,
                 backgroundColor: const Color(0xFF0A3D62),
                 child: Text(
                   (approval['student_name'] ?? 'S')
@@ -601,7 +603,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                       .toUpperCase(),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 32, // Reduced from 40
+                    fontSize: 32,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -609,9 +611,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             ),
           ),
           Expanded(
-            // Wrap in Expanded to prevent overflow
             child: SingleChildScrollView(
-              // Add scrolling for long content
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -620,7 +620,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                     Text(
                       approval['student_name'] ?? 'Unknown Student',
                       style: const TextStyle(
-                        fontSize: 16, // Reduced from 18
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                       maxLines: 1,
@@ -629,10 +629,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                     const SizedBox(height: 4),
                     Text(
                       approval['matric_no'] ?? 'N/A',
-                      style: TextStyle(
-                        fontSize: 11, // Reduced from 12
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                     ),
                     const SizedBox(height: 8),
                     Container(
@@ -647,7 +644,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                       child: Text(
                         _formatDate(approval['log_date']),
                         style: TextStyle(
-                          fontSize: 11, // Reduced from 12
+                          fontSize: 11,
                           color: Colors.orange[800],
                           fontWeight: FontWeight.w600,
                         ),
@@ -657,10 +654,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                       const SizedBox(height: 8),
                       Text(
                         approval['description'],
-                        style: TextStyle(
-                          fontSize: 12, // Reduced from 13
-                          color: Colors.grey[600],
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -675,14 +669,25 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
-                  // TODO: Navigate to log review page
+                onPressed: () async {
+                  // ✅ FIXED: Use SimpleLogbookEntryDetail instead
+                  final result = await context.pushFade(
+                    SimpleLogbookEntryDetail(
+                      logId: approval['id'],
+                      studentName:
+                          approval['student_name'] ?? 'Unknown Student',
+                      matricNo: approval['matric_no'] ?? 'N/A',
+                    ),
+                  );
+
+                  // Refresh dashboard if log was approved/rejected
+                  if (result == true && mounted) {
+                    _loadDashboardData();
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF0A3D62),
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 12,
-                  ), // Reduced from 14
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -691,7 +696,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                   'Review',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 15, // Reduced from 16
+                    fontSize: 15,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
