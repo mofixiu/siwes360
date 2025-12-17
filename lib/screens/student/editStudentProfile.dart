@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:siwes360/utils/request.dart';
 
 class EditStudentProfile extends StatefulWidget {
-  const EditStudentProfile({super.key});
+  final int studentId; // Change to just accept studentId
+
+  const EditStudentProfile({super.key, required this.studentId});
 
   @override
   State<EditStudentProfile> createState() => _EditStudentProfileState();
@@ -11,34 +15,93 @@ class EditStudentProfile extends StatefulWidget {
 class _EditStudentProfileState extends State<EditStudentProfile> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _companyController = TextEditingController();
-  final TextEditingController _supervisorController = TextEditingController();
-  final TextEditingController _startDateController = TextEditingController();
-  final TextEditingController _endDateController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _supervisorNameController =
+      TextEditingController();
+  final TextEditingController _supervisorPhoneController =
+      TextEditingController();
+  final TextEditingController _supervisorEmailController =
+      TextEditingController();
+  DateTime? _startDate;
+  DateTime? _endDate;
 
-  String _selectedLogbookStatus = 'In Progress';
-  final List<String> _logbookStatuses = [
-    'Not Started',
-    'In Progress',
-    'Completed',
-    'Under Review',
-  ];
+  bool _isLoading = true;
+  bool _isSaving = false;
+  String _errorMessage = '';
+  Map<String, dynamic>? _profileData;
 
   @override
   void initState() {
     super.initState();
-    // Pre-fill with existing data
-    _companyController.text = 'Innovatech Solutions Ltd.';
-    _supervisorController.text = 'Mr. Adebayo Adekunle';
-    _startDateController.text = 'Jan 2024';
-    _endDateController.text = 'Jun 2024';
+    _loadProfileData();
+  }
+
+  Future<void> _loadProfileData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      // Fetch fresh profile data from API
+      final result = await RequestService.getStudentProfile(widget.studentId);
+
+      if (result != null && result['status'] == 'success') {
+        final data = result['data'];
+
+        setState(() {
+          _profileData = data;
+
+          // Pre-fill form fields with fetched data
+          _companyController.text = data['workplace_name'] ?? '';
+          _locationController.text = data['workplace_location'] ?? '';
+          _addressController.text = data['workplace_address'] ?? '';
+          _supervisorNameController.text = data['supervisor_name'] ?? '';
+          _supervisorPhoneController.text = data['supervisor_phone'] ?? '';
+          _supervisorEmailController.text = data['supervisor_email'] ?? '';
+
+          // Parse dates
+          if (data['internship_start_date'] != null) {
+            try {
+              _startDate = DateTime.parse(data['internship_start_date']);
+            } catch (e) {
+              _startDate = null;
+            }
+          }
+
+          if (data['internship_end_date'] != null) {
+            try {
+              _endDate = DateTime.parse(data['internship_end_date']);
+            } catch (e) {
+              _endDate = null;
+            }
+          }
+
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = result?['message'] ?? 'Failed to load profile';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading profile: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
   }
 
   @override
   void dispose() {
     _companyController.dispose();
-    _supervisorController.dispose();
-    _startDateController.dispose();
-    _endDateController.dispose();
+    _locationController.dispose();
+    _addressController.dispose();
+    _supervisorNameController.dispose();
+    _supervisorPhoneController.dispose();
+    _supervisorEmailController.dispose();
     super.dispose();
   }
 
@@ -84,8 +147,7 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                   final XFile? photo = await picker.pickImage(
                     source: ImageSource.camera,
                   );
-                  if (photo != null) {
-                    // Handle photo upload
+                  if (photo != null && mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Profile photo updated'),
@@ -114,8 +176,7 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                   final XFile? image = await picker.pickImage(
                     source: ImageSource.gallery,
                   );
-                  if (image != null) {
-                    // Handle image upload
+                  if (image != null && mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Profile photo updated'),
@@ -133,13 +194,12 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
     );
   }
 
-  Future<void> _selectDate(
-    BuildContext context,
-    TextEditingController controller,
-  ) async {
+  Future<void> _selectDate(BuildContext context, bool isStartDate) async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
+      initialDate: isStartDate
+          ? (_startDate ?? DateTime.now())
+          : (_endDate ?? DateTime.now()),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
       builder: (context, child) {
@@ -158,49 +218,197 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
 
     if (picked != null) {
       setState(() {
-        controller.text = '${_getMonthName(picked.month)} ${picked.year}';
+        if (isStartDate) {
+          _startDate = picked;
+        } else {
+          _endDate = picked;
+        }
       });
     }
   }
 
-  String _getMonthName(int month) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return months[month - 1];
+  String _formatDate(DateTime? date) {
+    if (date == null) return 'Select date';
+    return DateFormat('MMM d, yyyy').format(date);
   }
 
-  void _saveChanges() {
-    if (_formKey.currentState!.validate()) {
-      // Save changes logic here
+  Future<void> _saveChanges() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (_startDate == null || _endDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Changes saved successfully'),
-          backgroundColor: Colors.green,
+          content: Text('Please select both start and end dates'),
+          backgroundColor: Colors.orange,
         ),
       );
-      Navigator.pop(context);
+      return;
+    }
+
+    if (_endDate!.isBefore(_startDate!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('End date must be after start date'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      // Format dates as YYYY-MM-DD for MySQL DATE columns
+      final startDateFormatted = DateFormat('yyyy-MM-dd').format(_startDate!);
+      final endDateFormatted = DateFormat('yyyy-MM-dd').format(_endDate!);
+
+      // Update internship details
+      final result = await RequestService.updateStudentInternshipDates(
+        widget.studentId,
+        startDateFormatted, // Send as YYYY-MM-DD string
+        endDateFormatted, // Send as YYYY-MM-DD string
+        workplaceName: _companyController.text.trim(),
+        workplaceAddress: _addressController.text.trim(),
+        workplaceLocation: _locationController.text.trim(),
+        supervisorName: _supervisorNameController.text.trim(),
+        supervisorPhone: _supervisorPhoneController.text.trim(),
+        supervisorEmail: _supervisorEmailController.text.trim(),
+      );
+
+      if (!mounted) return;
+
+      if (result != null && result['status'] == 'success') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile updated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Wait a bit to show the success message
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        if (mounted) {
+          Navigator.pop(context, true); // Return true to indicate success
+        }
+      } else {
+        throw Exception(result?['message'] ?? 'Failed to update profile');
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            'Edit Profile',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Color(0xFF0A3D62)),
+              const SizedBox(height: 16),
+              Text(
+                'Loading profile...',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            'Edit Profile',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _loadProfileData,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0A3D62),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 12,
+                    ),
+                  ),
+                  child: const Text(
+                    'Retry',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return GestureDetector(
-      behavior: HitTestBehavior.opaque, // Ensures the entire area detects taps
-      onTap: () {
-        FocusScope.of(context).unfocus();
-      },
+      behavior: HitTestBehavior.opaque,
+      onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
         appBar: AppBar(
           elevation: 0,
@@ -330,21 +538,28 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                       _buildReadOnlyField(
                         'INSTITUTION',
                         Icons.school_outlined,
-                        'Covenant University',
+                        _profileData?['school_name'] ?? 'N/A',
                       ),
                       const SizedBox(height: 12),
 
                       _buildReadOnlyField(
-                        'COURSE OF STUDY',
+                        'DEPARTMENT',
                         Icons.book_outlined,
-                        'Computer Science',
+                        _profileData?['department'] ?? 'N/A',
                       ),
                       const SizedBox(height: 12),
 
                       _buildReadOnlyField(
                         'EMAIL ADDRESS',
                         Icons.email_outlined,
-                        'mebo.2200290@stu.cu.edu.ng',
+                        _profileData?['email'] ?? 'N/A',
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildReadOnlyField(
+                        'MATRIC NUMBER',
+                        Icons.badge_outlined,
+                        _profileData?['matric_no'] ?? 'N/A',
                       ),
                     ],
                   ),
@@ -379,9 +594,9 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Company
+                      // Company Name
                       const Text(
-                        'COMPANY',
+                        'COMPANY NAME',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -412,7 +627,7 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                           ),
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
+                          if (value == null || value.trim().isEmpty) {
                             return 'Please enter company name';
                           }
                           return null;
@@ -420,9 +635,9 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Industry Supervisor
+                      // Company Location
                       const Text(
-                        'INDUSTRY SUPERVISOR',
+                        'COMPANY LOCATION',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -431,7 +646,90 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
-                        controller: _supervisorController,
+                        controller: _locationController,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
+                            Icons.location_on_outlined,
+                            color: Color(0xFF0A3D62),
+                          ),
+                          hintText: 'e.g., Lagos, Nigeria',
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF0A3D62),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter company location';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Company Address
+                      const Text(
+                        'COMPANY ADDRESS',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _addressController,
+                        maxLines: 2,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
+                            Icons.home_outlined,
+                            color: Color(0xFF0A3D62),
+                          ),
+                          hintText: 'Enter full address',
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF0A3D62),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter company address';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Supervisor Name
+                      const Text(
+                        'SUPERVISOR NAME',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _supervisorNameController,
                         decoration: InputDecoration(
                           prefixIcon: const Icon(
                             Icons.person_outline,
@@ -453,8 +751,95 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                           ),
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
+                          if (value == null || value.trim().isEmpty) {
                             return 'Please enter supervisor name';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Supervisor Phone
+                      const Text(
+                        'SUPERVISOR PHONE',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _supervisorPhoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
+                            Icons.phone_outlined,
+                            color: Color(0xFF0A3D62),
+                          ),
+                          hintText: 'Enter phone number',
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF0A3D62),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter phone number';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Supervisor Email
+                      const Text(
+                        'SUPERVISOR EMAIL',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _supervisorEmailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
+                            Icons.email_outlined,
+                            color: Color(0xFF0A3D62),
+                          ),
+                          hintText: 'Enter email address',
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF0A3D62),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter email address';
+                          }
+                          if (!value.contains('@')) {
+                            return 'Please enter a valid email';
                           }
                           return null;
                         },
@@ -474,120 +859,73 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                       Row(
                         children: [
                           Expanded(
-                            child: TextFormField(
-                              controller: _startDateController,
-                              readOnly: true,
-                              decoration: InputDecoration(
-                                prefixIcon: const Icon(
-                                  Icons.calendar_today_outlined,
-                                  color: Color(0xFF0A3D62),
-                                ),
-                                hintText: 'Start date',
-                                filled: true,
-                                fillColor: Colors.grey[100],
-                                border: OutlineInputBorder(
+                            child: InkWell(
+                              onTap: () => _selectDate(context, true),
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide.none,
                                 ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(
-                                    color: Color(0xFF0A3D62),
-                                    width: 2,
-                                  ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.calendar_today_outlined,
+                                      color: Color(0xFF0A3D62),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        _formatDate(_startDate),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: _startDate == null
+                                              ? Colors.grey[600]
+                                              : Colors.black,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              onTap: () =>
-                                  _selectDate(context, _startDateController),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Select date';
-                                }
-                                return null;
-                              },
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: TextFormField(
-                              controller: _endDateController,
-                              readOnly: true,
-                              decoration: InputDecoration(
-                                prefixIcon: const Icon(
-                                  Icons.calendar_today_outlined,
-                                  color: Color(0xFF0A3D62),
-                                ),
-                                hintText: 'End date',
-                                filled: true,
-                                fillColor: Colors.grey[100],
-                                border: OutlineInputBorder(
+                            child: InkWell(
+                              onTap: () => _selectDate(context, false),
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide.none,
                                 ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(
-                                    color: Color(0xFF0A3D62),
-                                    width: 2,
-                                  ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.calendar_today_outlined,
+                                      color: Color(0xFF0A3D62),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        _formatDate(_endDate),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: _endDate == null
+                                              ? Colors.grey[600]
+                                              : Colors.black,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              onTap: () =>
-                                  _selectDate(context, _endDateController),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Select date';
-                                }
-                                return null;
-                              },
                             ),
                           ),
                         ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Logbook Status
-                      const Text(
-                        'LOGBOOK STATUS',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _selectedLogbookStatus,
-                        decoration: InputDecoration(
-                          prefixIcon: const Icon(
-                            Icons.library_books_outlined,
-                            color: Color(0xFF0A3D62),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: Color(0xFF0A3D62),
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                        items: _logbookStatuses.map((String status) {
-                          return DropdownMenuItem<String>(
-                            value: status,
-                            child: Text(status),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedLogbookStatus = newValue!;
-                          });
-                        },
                       ),
                     ],
                   ),
@@ -601,28 +939,38 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _saveChanges,
+                    onPressed: _isSaving ? null : _saveChanges,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0A3D62),
+                      disabledBackgroundColor: Colors.grey,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.check, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text(
-                          'Save Changes',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.check, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Save Changes',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
 

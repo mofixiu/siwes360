@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/auth/login.dart';
+import 'package:siwes360/utils/request.dart';
+import 'package:siwes360/utils/role_router.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -58,10 +60,82 @@ class _SplashScreenState extends State<SplashScreen>
     // Start fade animation for text
     await _fadeController.forward();
 
-    // Wait a bit then navigate
+    // Wait a bit before checking authentication
     await Future.delayed(const Duration(milliseconds: 1000));
 
     if (mounted) {
+      await _checkAuthAndNavigate();
+    }
+  }
+
+  Future<void> _checkAuthAndNavigate() async {
+    try {
+      // Initialize RequestService first and WAIT for it
+      if (!RequestService.isInitialized) {
+        await RequestService.initialize(); // Add await here!
+      }
+
+      // Load token from storage
+      await RequestService.loadAuthToken();
+
+      // Check if user data exists in storage
+      final userData = await RequestService.loadUserData();
+
+      // Get the token after ensuring it's loaded
+      final token = RequestService.authToken;
+
+      print('Debug - Token: $token');
+      print('Debug - UserData: $userData');
+      print('Debug - Role: ${userData?['role']}');
+
+      if (!mounted) return;
+
+      // If both token and user data exist, navigate to role-based dashboard
+      if (token != null &&
+          token.isNotEmpty &&
+          userData != null &&
+          userData['role'] != null) {
+        final role = userData['role'];
+
+        print('✅ Auto-login successful for role: $role');
+
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                RoleRouter.getHomeScreen(role),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+            transitionDuration: const Duration(milliseconds: 500),
+          ),
+        );
+      } else {
+        print('❌ No valid session found, redirecting to login');
+        print('Token is null: ${token == null}');
+        print('Token is empty: ${token?.isEmpty}');
+        print('UserData is null: ${userData == null}');
+        print('Role is null: ${userData?['role'] == null}');
+
+        // No valid session, navigate to login
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                const Login(),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+            transitionDuration: const Duration(milliseconds: 500),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Auth check error: $e');
+
+      if (!mounted) return;
+
+      // On error, navigate to login
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) =>

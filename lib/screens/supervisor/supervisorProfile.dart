@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/screens/supervisor/editSupervisorProfile.dart';
 import 'package:siwes360/screens/supervisor/supervisorSettings.dart';
+import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class SupervisorProfile extends StatefulWidget {
   const SupervisorProfile({super.key});
@@ -11,404 +13,594 @@ class SupervisorProfile extends StatefulWidget {
 }
 
 class _SupervisorProfileState extends State<SupervisorProfile> {
-  String _selectedTab = 'students'; // 'students' or 'institutions'
+  String _selectedTab = 'students';
+  bool _isLoading = true;
+  Map<String, dynamic>? _profileData;
+  List<Map<String, dynamic>> _students = [];
+  List<Map<String, dynamic>> _institutions = [];
+  String _errorMessage = '';
+  String _bio = '';
 
-  // Sample data for students
-  final List<Map<String, String>> _students = [
-    {
-      'name': 'Adekunle Adebayo',
-      'id': '123456',
-      'school': 'Covenant University',
-      'image': 'assets/images/avatar.jpeg',
-    },
-    {
-      'name': 'Chiamaka Nwosu',
-      'id': '654321',
-      'school': 'University of Lagos',
-      'image': 'assets/images/avatar.jpeg',
-    },
-    {
-      'name': 'David Okon',
-      'id': '789012',
-      'school': 'Covenant University',
-      'image': 'assets/images/avatar.jpeg',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+    _loadBio();
+  }
 
-  // Sample data for associated institutions
-  final List<Map<String, dynamic>> _institutions = [
-    {'name': 'Covenant University', 'studentCount': 2, 'icon': Icons.school},
-    {'name': 'University of Lagos', 'studentCount': 1, 'icon': Icons.school},
-  ];
+  Future<void> _loadProfile() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
 
-  List<Map<String, String>> get _filteredStudents {
-    return _students;
+    try {
+      // Load user data from storage
+      final userData = await RequestService.loadUserData();
+
+      if (userData == null || userData['role_data'] == null) {
+        setState(() {
+          _errorMessage = 'User data not found. Please login again.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final supervisorId = userData['role_data']['user_id'];
+
+      // Fetch supervisor profile from API
+      final result = await RequestService.getSupervisorById(supervisorId);
+
+      if (result != null && result['status'] == 'success') {
+        setState(() {
+          _profileData = result['data'];
+        });
+
+        // Fetch students
+        await _loadStudents(supervisorId);
+      } else {
+        setState(() {
+          _errorMessage = result?['message'] ?? 'Failed to load profile';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading profile: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadStudents(int supervisorId) async {
+    try {
+      final result = await RequestService.getSupervisorStudents(supervisorId);
+
+      if (result != null && result['status'] == 'success') {
+        final students = List<Map<String, dynamic>>.from(result['data'] ?? []);
+
+        // Group students by institution
+        Map<String, int> institutionCounts = {};
+        for (var student in students) {
+          final school = student['school_name'] ?? 'Unknown Institution';
+          institutionCounts[school] = (institutionCounts[school] ?? 0) + 1;
+        }
+
+        // Create institutions list
+        final institutions = institutionCounts.entries.map((entry) {
+          return {
+            'name': entry.key,
+            'studentCount': entry.value,
+            'icon': Icons.school,
+          };
+        }).toList();
+
+        setState(() {
+          _students = students;
+          _institutions = institutions;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadBio() async {
+    try {
+      final box = await Hive.openBox('supervisorData');
+      final savedBio = box.get('bio', defaultValue: '');
+      setState(() {
+        _bio = savedBio;
+      });
+    } catch (e) {
+      print('Error loading bio: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
+        body: const Center(
+          child: CircularProgressIndicator(color: Color(0xFF0A3D62)),
+        ),
+        bottomNavigationBar: const SupervisorBottomNavBar(currentIndex: 2),
+      );
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Scaffold(
+        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadProfile,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0A3D62),
+                ),
+                child: const Text(
+                  'Retry',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: const SupervisorBottomNavBar(currentIndex: 2),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Profile',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.settings_outlined,
-                        color: Color(0xFF0A3D62),
-                      ),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const SupervisorSettings(),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Profile Card
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 20),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  children: [
-                    // Profile Picture with edit button
-                    Stack(
-                      children: [
-                        Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.orange[100],
-                          ),
-                          child: ClipOval(
-                            child: Image.asset(
-                              'assets/images/avatar.jpeg',
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Icon(
-                                  Icons.person,
-                                  size: 60,
-                                  color: Colors.grey[400],
-                                );
-                              },
-                            ),
-                          ),
+        child: RefreshIndicator(
+          onRefresh: _loadProfile,
+          color: const Color(0xFF0A3D62),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Profile',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
                         ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF0A3D62),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.settings_outlined,
+                          color: Color(0xFF0A3D62),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Name
-                    const Text(
-                      'Dr. Amina Bello',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-
-                    // Designation
-                    Text(
-                      'Industry Supervisor',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Innovatech Solutions Ltd.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF0A3D62),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Edit Profile Button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
                         onPressed: () {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) =>
-                                  const EditSupervisorProfile(),
+                              builder: (context) => const SupervisorSettings(),
                             ),
                           );
                         },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0A3D62),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Profile Card
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      // Profile Picture
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFF0A3D62),
                         ),
-                        child: const Text(
-                          'Edit Profile',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Personal Details Section
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 20),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Contact Details',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    _buildInfoRow(
-                      Icons.email_outlined,
-                      'Email',
-                      'amina.bello@innovatech.com',
-                      Colors.grey[200]!,
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildInfoRow(
-                      Icons.phone_outlined,
-                      'Phone Number',
-                      '+234 801 234 5678',
-                      Colors.grey[200]!,
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildInfoRow(
-                      Icons.business_outlined,
-                      'Position',
-                      'Senior Software Engineer',
-                      Colors.grey[200]!,
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildInfoRow(
-                      Icons.location_on_outlined,
-                      'Office Location',
-                      'Block A, Floor 3, Room 305',
-                      Colors.grey[200]!,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Management Section
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 20),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Management',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Tabs
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _selectedTab = 'students';
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _selectedTab == 'students'
-                                      ? const Color(0xFF0A3D62)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  'Intern Students',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: _selectedTab == 'students'
-                                        ? Colors.white
-                                        : Colors.grey[600],
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
+                        child: Center(
+                          child: Text(
+                            (_profileData?['full_name'] ?? 'U')
+                                .substring(0, 1)
+                                .toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 48,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _selectedTab = 'institutions';
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Name
+                      Text(
+                        _profileData?['full_name'] ?? 'Unknown',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+
+                      // Position
+                      Text(
+                        _profileData?['position'] ?? 'Industry Supervisor',
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _profileData?['organization'] ?? 'N/A',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF0A3D62),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Edit Profile Button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => EditSupervisorProfile(
+                                  supervisorId: _profileData!['user_id'],
                                 ),
-                                decoration: BoxDecoration(
-                                  color: _selectedTab == 'institutions'
-                                      ? const Color(0xFF0A3D62)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  'Institutions',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: _selectedTab == 'institutions'
-                                        ? Colors.white
-                                        : Colors.grey[600],
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
+                              ),
+                            );
+
+                            // Reload profile if changes were saved
+                            if (result == true && mounted) {
+                              _loadProfile();
+                              _loadBio();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0A3D62),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Edit Profile',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Personal Details Section
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Contact Details',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      _buildInfoRow(
+                        Icons.email_outlined,
+                        'Email',
+                        _profileData?['email'] ?? 'N/A',
+                        Colors.grey[200]!,
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildInfoRow(
+                        Icons.phone_outlined,
+                        'Phone Number',
+                        _profileData?['phone'] ?? 'N/A',
+                        Colors.grey[200]!,
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildInfoRow(
+                        Icons.work_outline,
+                        'Position',
+                        _profileData?['position'] ?? 'N/A',
+                        Colors.grey[200]!,
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildInfoRow(
+                        Icons.business_outlined,
+                        'Organization',
+                        _profileData?['organization'] ?? 'N/A',
+                        Colors.grey[200]!,
+                      ),
+
+                      // Show bio if available
+                      if (_bio.isNotEmpty) ...[
+                        const SizedBox(height: 20),
+                        const Text(
+                          'About',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue[200]!),
+                          ),
+                          child: Text(
+                            _bio,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[800],
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Management Section
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Text(
+                            'Management',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0A3D62).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '${_students.length} ${_students.length == 1 ? 'Student' : 'Students'}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF0A3D62),
                               ),
                             ),
                           ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 16),
 
-                    const SizedBox(height: 16),
-
-                    // Search Bar (only for students tab)
-                    if (_selectedTab == 'students')
+                      // Tabs
                       Container(
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
                           color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        child: TextField(
-                          decoration: InputDecoration(
-                            hintText: 'Search students...',
-                            hintStyle: TextStyle(color: Colors.grey[400]),
-                            prefixIcon: Icon(
-                              Icons.search,
-                              color: Colors.grey[400],
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedTab = 'students';
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _selectedTab == 'students'
+                                        ? const Color(0xFF0A3D62)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'Intern Students',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: _selectedTab == 'students'
+                                          ? Colors.white
+                                          : Colors.grey[600],
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedTab = 'institutions';
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _selectedTab == 'institutions'
+                                        ? const Color(0xFF0A3D62)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'Institutions',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: _selectedTab == 'institutions'
+                                          ? Colors.white
+                                          : Colors.grey[600],
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
                       ),
 
-                    if (_selectedTab == 'students') const SizedBox(height: 16),
+                      const SizedBox(height: 16),
 
-                    // Content based on selected tab
-                    if (_selectedTab == 'students')
-                      ..._filteredStudents.map((student) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _buildStudentTile(
-                            student['name']!,
-                            'ID: ${student['id']}',
-                            student['school']!,
-                            student['image']!,
-                          ),
-                        );
-                      })
-                    else
-                      ..._institutions.map((institution) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _buildInstitutionTile(
-                            institution['name']!,
-                            institution['studentCount']!,
-                            institution['icon']!,
-                          ),
-                        );
-                      }),
-                  ],
+                      // Content based on selected tab
+                      if (_selectedTab == 'students')
+                        _students.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(32),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.people_outline,
+                                        size: 48,
+                                        color: Colors.grey[400],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'No students assigned yet',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            : Column(
+                                children: _students.map((student) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _buildStudentTile(
+                                      student['full_name'] ?? 'Unknown',
+                                      student['matric_no'] ?? 'N/A',
+                                      student['school_name'] ??
+                                          'Unknown Institution',
+                                      student['department'] ?? '',
+                                    ),
+                                  );
+                                }).toList(),
+                              )
+                      else
+                        _institutions.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(32),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.school_outlined,
+                                        size: 48,
+                                        color: Colors.grey[400],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'No institutions yet',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            : Column(
+                                children: _institutions.map((institution) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _buildInstitutionTile(
+                                      institution['name']!,
+                                      institution['studentCount']!,
+                                      institution['icon']!,
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                    ],
+                  ),
                 ),
-              ),
 
-              const SizedBox(height: 100),
-            ],
+                const SizedBox(height: 100),
+              ],
+            ),
           ),
         ),
       ),
@@ -459,9 +651,9 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
 
   Widget _buildStudentTile(
     String name,
-    String id,
+    String matric,
     String school,
-    String imageUrl,
+    String department,
   ) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -475,17 +667,18 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
           Container(
             width: 45,
             height: 45,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.grey[300],
+              color: Color(0xFF0A3D62),
             ),
-            child: ClipOval(
-              child: Image.asset(
-                imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Icon(Icons.person, size: 22, color: Colors.grey[600]);
-                },
+            child: Center(
+              child: Text(
+                name.substring(0, 1).toUpperCase(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -503,7 +696,7 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  id,
+                  '$matric ${department.isNotEmpty ? '• $department' : ''}',
                   style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
                 const SizedBox(height: 2),
@@ -515,9 +708,12 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
                       color: Colors.grey[500],
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      school,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    Expanded(
+                      child: Text(
+                        school,
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/screens/supervisor/studentLogbookView.dart';
+import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
 
 class SupervisorStudentsPage extends StatefulWidget {
@@ -14,70 +15,96 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
-  final List<Student> _students = [
-    Student(
-      name: 'John Doe',
-      matric: 'CS/2021/045',
-      department: 'Computer Science',
-      imageUrl: 'assets/images/avatar.jpeg',
-      status: StudentStatus.newEntries,
-      newEntriesCount: 3,
-      isOnline: true,
-    ),
-    Student(
-      name: 'Sarah Smith',
-      matric: 'EN/2021/112',
-      department: 'Engineering',
-      imageUrl: 'assets/images/avatar.jpeg',
-      status: StudentStatus.upToDate,
-      isOnline: false,
-    ),
-    Student(
-      name: 'Michael Obi',
-      matric: 'MC/2021/008',
-      department: 'Mass Comm',
-      imageUrl: 'assets/images/avatar.jpeg',
-      status: StudentStatus.pendingApproval,
-      isOnline: false,
-    ),
-    Student(
-      name: 'Amara Kalu',
-      matric: 'EC/2021/092',
-      department: 'Economics',
-      imageUrl: 'assets/images/avatar.jpeg',
-      status: StudentStatus.newEntries,
-      newEntriesCount: 1,
-      isOnline: false,
-    ),
-  ];
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _students = [];
+  String _errorMessage = '';
 
-  List<Student> get _filteredStudents {
-    List<Student> filtered = _students;
+  @override
+  void initState() {
+    super.initState();
+    _loadStudents();
+  }
+
+  Future<void> _loadStudents() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      // Load user data from storage
+      final userData = await RequestService.loadUserData();
+
+      if (userData == null || userData['role_data'] == null) {
+        setState(() {
+          _errorMessage = 'User data not found. Please login again.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final supervisorId = userData['role_data']['user_id'];
+
+      // Fetch students from API
+      final result = await RequestService.getSupervisorStudents(supervisorId);
+
+      if (result != null && result['status'] == 'success') {
+        setState(() {
+          _students = List<Map<String, dynamic>>.from(result['data'] ?? []);
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = result?['message'] ?? 'Failed to load students';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading students: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
+  }
+
+  StudentStatus _getStudentStatus(Map<String, dynamic> student) {
+    final pendingLogs = student['pending_logs'] ?? 0;
+    final totalLogs = student['total_logs'] ?? 0;
+
+    if (pendingLogs > 0) {
+      return StudentStatus.newEntries;
+    } else if (totalLogs > 0) {
+      return StudentStatus.upToDate;
+    } else {
+      return StudentStatus.upToDate;
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredStudents {
+    List<Map<String, dynamic>> filtered = _students;
 
     // Apply filter
     if (_selectedFilter == 'Review Needed') {
-      filtered = filtered
-          .where(
-            (s) =>
-                s.status == StudentStatus.newEntries ||
-                s.status == StudentStatus.pendingApproval,
-          )
-          .toList();
+      filtered = filtered.where((s) {
+        final status = _getStudentStatus(s);
+        return status == StudentStatus.newEntries ||
+            status == StudentStatus.pendingApproval;
+      }).toList();
     } else if (_selectedFilter == 'Up to Date') {
-      filtered = filtered
-          .where((s) => s.status == StudentStatus.upToDate)
-          .toList();
+      filtered = filtered.where((s) {
+        final status = _getStudentStatus(s);
+        return status == StudentStatus.upToDate;
+      }).toList();
     }
 
     // Apply search
     if (_searchQuery.isNotEmpty) {
-      filtered = filtered
-          .where(
-            (s) =>
-                s.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                s.matric.toLowerCase().contains(_searchQuery.toLowerCase()),
-          )
-          .toList();
+      filtered = filtered.where((s) {
+        final name = (s['full_name'] ?? '').toLowerCase();
+        final matric = (s['matric_no'] ?? '').toLowerCase();
+        final query = _searchQuery.toLowerCase();
+        return name.contains(query) || matric.contains(query);
+      }).toList();
     }
 
     return filtered;
@@ -91,27 +118,12 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'My Students',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.filter_list),
-                    onPressed: () {
-                      // Show filter options
-                    },
-                  ),
-                ],
+            // Header - removed refresh button
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'My Students',
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
               ),
             ),
 
@@ -165,7 +177,46 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
 
             // Students List
             Expanded(
-              child: _filteredStudents.isEmpty
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF0A3D62),
+                      ),
+                    )
+                  : _errorMessage.isNotEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 64,
+                            color: Colors.red[300],
+                          ),
+                          const SizedBox(height: 16),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              _errorMessage,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          ElevatedButton(
+                            onPressed: _loadStudents,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0A3D62),
+                            ),
+                            child: const Text(
+                              'Retry',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : _filteredStudents.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -177,21 +228,37 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'No students found',
+                            _searchQuery.isNotEmpty
+                                ? 'No students found'
+                                : 'No students assigned yet',
                             style: TextStyle(
                               fontSize: 18,
                               color: Colors.grey[600],
                             ),
                           ),
+                          if (_searchQuery.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Try a different search term',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      itemCount: _filteredStudents.length,
-                      itemBuilder: (context, index) {
-                        return _buildStudentCard(_filteredStudents[index]);
-                      },
+                  : RefreshIndicator(
+                      onRefresh: _loadStudents,
+                      color: const Color(0xFF0A3D62),
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        itemCount: _filteredStudents.length,
+                        itemBuilder: (context, index) {
+                          return _buildStudentCard(_filteredStudents[index]);
+                        },
+                      ),
                     ),
             ),
           ],
@@ -227,15 +294,36 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
     );
   }
 
-  Widget _buildStudentCard(Student student) {
+  Widget _buildStudentCard(Map<String, dynamic> studentData) {
+    final status = _getStudentStatus(studentData);
+    final pendingLogs = studentData['pending_logs'] ?? 0;
+
+    // Create Student object for navigation
+    final student = Student(
+      userId: studentData['user_id'],
+      name: studentData['full_name'] ?? 'Unknown',
+      matric: studentData['matric_no'] ?? 'N/A',
+      department: studentData['department'] ?? 'N/A',
+      imageUrl: 'assets/images/avatar.jpeg',
+      status: status,
+      newEntriesCount: pendingLogs > 0 ? pendingLogs : null,
+      isOnline: false, // TODO: Implement online status tracking
+    );
+
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        // Navigate and reload on return
+        final result = await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => StudentLogbookView(student: student),
           ),
         );
+
+        // Reload students list if logbook was updated
+        if (result == true) {
+          _loadStudents();
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
@@ -246,45 +334,24 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
         ),
         child: Row(
           children: [
-            // Avatar with online indicator
-            Stack(
-              children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.grey[300],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      student.imageUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Icon(
-                          Icons.person,
-                          size: 30,
-                          color: Colors.grey[600],
-                        );
-                      },
-                    ),
+            // Avatar
+            Container(
+              width: 60,
+              height: 60,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFF0A3D62),
+              ),
+              child: Center(
+                child: Text(
+                  student.name.substring(0, 1).toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (student.isOnline)
-                  Positioned(
-                    bottom: 2,
-                    right: 2,
-                    child: Container(
-                      width: 14,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        color: Colors.green,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
             const SizedBox(width: 16),
 
@@ -379,6 +446,7 @@ class _SupervisorStudentsPageState extends State<SupervisorStudentsPage> {
 
 // Student Model
 class Student {
+  final int userId;
   final String name;
   final String matric;
   final String department;
@@ -388,6 +456,7 @@ class Student {
   final bool isOnline;
 
   Student({
+    required this.userId,
     required this.name,
     required this.matric,
     required this.department,

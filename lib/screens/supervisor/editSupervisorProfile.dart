@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:siwes360/utils/request.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class EditSupervisorProfile extends StatefulWidget {
-  const EditSupervisorProfile({super.key});
+  final int supervisorId;
+
+  const EditSupervisorProfile({super.key, required this.supervisorId});
 
   @override
   State<EditSupervisorProfile> createState() => _EditSupervisorProfileState();
@@ -15,22 +19,73 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
   final TextEditingController _organizationController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _positionController = TextEditingController();
-  final TextEditingController _officeLocationController =
-      TextEditingController();
   final TextEditingController _bioController = TextEditingController();
+
+  bool _isLoading = true;
+  bool _isSaving = false;
+  String _errorMessage = '';
+  Map<String, dynamic>? _profileData;
 
   @override
   void initState() {
     super.initState();
-    // Pre-fill with existing data
-    _nameController.text = 'Dr. Amina Bello';
-    _emailController.text = 'amina.bello@innovatech.com';
-    _organizationController.text = 'Innovatech Solutions Ltd.';
-    _phoneController.text = '+234 801 234 5678';
-    _positionController.text = 'Senior Software Engineer';
-    _officeLocationController.text = 'Block A, Floor 3, Room 305';
-    _bioController.text =
-        'Experienced software engineer with over 10 years in the tech industry, passionate about mentoring young talents and helping them develop practical skills.';
+    _loadProfileData();
+  }
+
+  Future<void> _loadProfileData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      // Fetch fresh profile data from API
+      final result = await RequestService.getSupervisorById(
+        widget.supervisorId,
+      );
+
+      if (result != null && result['status'] == 'success') {
+        final data = result['data'];
+
+        setState(() {
+          _profileData = data;
+
+          // Pre-fill form fields with fetched data
+          _nameController.text = data['full_name'] ?? '';
+          _emailController.text = data['email'] ?? '';
+          _organizationController.text = data['organization'] ?? '';
+          _phoneController.text = data['phone'] ?? '';
+          _positionController.text = data['position'] ?? '';
+
+          _isLoading = false;
+        });
+
+        // Load bio from local storage
+        await _loadBio();
+      } else {
+        setState(() {
+          _errorMessage = result?['message'] ?? 'Failed to load profile';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading profile: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadBio() async {
+    try {
+      final box = await Hive.openBox('supervisorData');
+      final savedBio = box.get('bio', defaultValue: '');
+      setState(() {
+        _bioController.text = savedBio;
+      });
+    } catch (e) {
+      print('Error loading bio: $e');
+    }
   }
 
   @override
@@ -40,7 +95,6 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
     _organizationController.dispose();
     _phoneController.dispose();
     _positionController.dispose();
-    _officeLocationController.dispose();
     _bioController.dispose();
     super.dispose();
   }
@@ -138,20 +192,173 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
     );
   }
 
-  void _saveChanges() {
-    if (_formKey.currentState!.validate()) {
+  Future<void> _saveChanges() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      // Prepare update data for API
+      final updateData = {
+        'full_name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'organization': _organizationController.text.trim(),
+        'position': _positionController.text.trim(),
+      };
+
+      // Update supervisor profile via API
+      final result = await RequestService.updateSupervisorProfile(
+        widget.supervisorId,
+        updateData,
+      );
+
+      if (!mounted) return;
+
+      if (result != null && result['status'] == 'success') {
+        // Save bio locally (not in database)
+        await _saveBioLocally(_bioController.text.trim());
+
+        // Update local user data
+        await _updateLocalUserData(result['data']);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile updated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        Navigator.pop(context, true); // Return true to indicate success
+      } else {
+        throw Exception(result?['message'] ?? 'Failed to update profile');
+      }
+    } catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Changes saved successfully'),
-          backgroundColor: Colors.green,
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
         ),
       );
-      Navigator.pop(context);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _saveBioLocally(String bio) async {
+    try {
+      final box = await Hive.openBox('supervisorData');
+      await box.put('bio', bio);
+    } catch (e) {
+      print('Error saving bio: $e');
+    }
+  }
+
+  Future<void> _updateLocalUserData(Map<String, dynamic> updatedData) async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        // Update the role_data with new information
+        userData['user']['full_name'] = updatedData['full_name'];
+        userData['user']['email'] = updatedData['email'];
+        userData['user']['phone'] = updatedData['phone'];
+        userData['role_data']['organization'] = updatedData['organization'];
+        userData['role_data']['position'] = updatedData['position'];
+
+        await RequestService.saveUserData(userData);
+      }
+    } catch (e) {
+      print('Error updating local user data: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            'Edit Profile',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(color: Color(0xFF0A3D62)),
+        ),
+      );
+    }
+
+    if (_errorMessage.isNotEmpty) {
+      return Scaffold(
+        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            'Edit Profile',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadProfileData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0A3D62),
+                ),
+                child: const Text(
+                  'Retry',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
@@ -186,21 +393,20 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                     Container(
                       width: 120,
                       height: 120,
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.orange[100],
+                        color: Color(0xFF0A3D62),
                       ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          'assets/images/avatar.jpeg',
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Icon(
-                              Icons.person,
-                              size: 60,
-                              color: Colors.grey[400],
-                            );
-                          },
+                      child: Center(
+                        child: Text(
+                          (_profileData?['full_name'] ?? 'U')
+                              .substring(0, 1)
+                              .toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 48,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
@@ -494,55 +700,19 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Office Location
-                      const Text(
-                        'OFFICE LOCATION',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _officeLocationController,
-                        decoration: InputDecoration(
-                          prefixIcon: const Icon(
-                            Icons.location_on_outlined,
-                            color: Color(0xFF0A3D62),
-                          ),
-                          hintText: 'Enter office location',
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: Color(0xFF0A3D62),
-                              width: 2,
+                      // Bio (stored locally only)
+                      Row(
+                        children: [
+                          const Text(
+                            'BIO',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey,
                             ),
                           ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter office location';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Bio
-                      const Text(
-                        'BIO / ABOUT',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
+                          const SizedBox(width: 8),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
@@ -564,12 +734,6 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                             ),
                           ),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter your bio';
-                          }
-                          return null;
-                        },
                       ),
                     ],
                   ),
@@ -583,28 +747,40 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _saveChanges,
+                    onPressed: _isSaving ? null : _saveChanges,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0A3D62),
+                      disabledBackgroundColor: Colors.grey,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.check, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text(
-                          'Save Changes',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.check, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Save Changes',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
 

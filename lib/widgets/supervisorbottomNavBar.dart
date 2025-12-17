@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
-import 'package:siwes360/screens/student/studentProfile.dart';
 import 'package:siwes360/screens/supervisor/supervisorDashboard.dart';
 import 'package:siwes360/screens/supervisor/supervisorProfile.dart';
 import 'package:siwes360/screens/supervisor/supervisorStudentsPage.dart';

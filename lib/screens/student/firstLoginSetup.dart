@@ -224,15 +224,22 @@ class _FirstLoginSetupState extends State<FirstLoginSetup> {
     try {
       final studentId = widget.userData['role_data']['user_id'];
 
-      // MODIFIED: Include supervisor_id in the request
+      // Format dates as YYYY-MM-DD
+      final startDateFormatted = _selectedStartDate!.toIso8601String().split(
+        'T',
+      )[0];
+      final endDateFormatted = _selectedEndDate!.toIso8601String().split(
+        'T',
+      )[0];
+
       final result = await RequestService.updateStudentInternshipDates(
         studentId,
-        _selectedStartDate!.toIso8601String().split('T')[0],
-        _selectedEndDate!.toIso8601String().split('T')[0],
+        startDateFormatted,
+        endDateFormatted,
         workplaceName: _workplaceNameController.text.trim(),
         workplaceAddress: _workplaceAddressController.text.trim(),
         workplaceLocation: _workplaceLocationController.text.trim(),
-        supervisorId: _selectedSupervisorId, // ADD THIS
+        supervisorId: _selectedSupervisorId,
         supervisorName: _supervisorNameController.text.trim(),
         supervisorPhone: _supervisorPhoneController.text.trim(),
         supervisorEmail: _supervisorEmailController.text.trim(),
@@ -241,27 +248,31 @@ class _FirstLoginSetupState extends State<FirstLoginSetup> {
       if (!mounted) return;
 
       if (result != null && result['status'] == 'success') {
-        // Update local user data
-        widget.userData['role_data']['internship_start_date'] =
-            _selectedStartDate!.toIso8601String().split('T')[0];
-        widget.userData['role_data']['internship_end_date'] = _selectedEndDate!
-            .toIso8601String()
-            .split('T')[0];
-        widget.userData['role_data']['is_first_login'] = false;
-        widget.userData['role_data']['workplace_name'] =
-            _workplaceNameController.text.trim();
-        widget.userData['role_data']['workplace_address'] =
-            _workplaceAddressController.text.trim();
-        widget.userData['role_data']['workplace_location'] =
-            _workplaceLocationController.text.trim();
-        widget.userData['role_data']['supervisor_id'] = _selectedSupervisorId;
-        widget.userData['role_data']['supervisor_name'] =
-            _supervisorNameController.text.trim();
-        widget.userData['role_data']['supervisor_phone'] =
-            _supervisorPhoneController.text.trim();
-        widget.userData['role_data']['supervisor_email'] =
-            _supervisorEmailController.text.trim();
+        // Update local user data with the response from backend
+        final updatedData = result['data'];
 
+        widget.userData['role_data']['internship_start_date'] =
+            updatedData['internship_start_date'];
+        widget.userData['role_data']['internship_end_date'] =
+            updatedData['internship_end_date'];
+        widget.userData['role_data']['is_first_login'] =
+            updatedData['is_first_login']; // Use value from backend
+        widget.userData['role_data']['workplace_name'] =
+            updatedData['workplace_name'];
+        widget.userData['role_data']['workplace_address'] =
+            updatedData['workplace_address'];
+        widget.userData['role_data']['workplace_location'] =
+            updatedData['workplace_location'];
+        widget.userData['role_data']['supervisor_id'] =
+            updatedData['supervisor_id'];
+        widget.userData['role_data']['supervisor_name'] =
+            updatedData['supervisor_name'];
+        widget.userData['role_data']['supervisor_phone'] =
+            updatedData['supervisor_phone'];
+        widget.userData['role_data']['supervisor_email'] =
+            updatedData['supervisor_email'];
+
+        // Save updated user data to storage
         await RequestService.saveUserData(widget.userData);
 
         if (!mounted) return;
@@ -273,6 +284,7 @@ class _FirstLoginSetupState extends State<FirstLoginSetup> {
           ),
         );
 
+        // Navigate to dashboard
         RoleRouter.navigateToRoleBasedHome(context, 'student');
       } else {
         if (!mounted) return;

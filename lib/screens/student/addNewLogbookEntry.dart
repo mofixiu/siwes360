@@ -187,12 +187,12 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
 
     if (!_formKey.currentState!.validate()) {
       print('Form validation failed');
-      
+
       // Enable auto-validation after first failed attempt
       setState(() {
         _autovalidateMode = AutovalidateMode.onUserInteraction;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please fill in all required fields correctly'),
@@ -222,10 +222,19 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
       final studentId = userData['role_data']['user_id'];
       print('Student ID: $studentId');
 
+      // Format date as YYYY-MM-DD in local timezone (no UTC conversion)
+      final formattedDate =
+          '${_selectedDate.year}-'
+          '${_selectedDate.month.toString().padLeft(2, '0')}-'
+          '${_selectedDate.day.toString().padLeft(2, '0')}';
+
+      print('Selected date: $_selectedDate');
+      print('Formatted date: $formattedDate');
+
       // Prepare log data
       final logData = {
         'student_id': studentId,
-        'log_date': _selectedDate.toIso8601String().split('T')[0],
+        'log_date': formattedDate, // Use local date format
         'description': _activitiesController.text.trim(),
         'skills_acquired': _skillsController.text.trim().isNotEmpty
             ? _skillsController.text.trim()
@@ -274,7 +283,6 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
           ),
         );
 
-        // Clear form
         _activitiesController.clear();
         _skillsController.clear();
         _challengesController.clear();
@@ -284,7 +292,6 @@ class _AddNewLogEntryState extends State<AddNewLogEntry> {
           _dateController.text = _formatDate(_selectedDate);
         });
 
-        // Navigate back with delay to show snackbar
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
           Navigator.pop(context, true);

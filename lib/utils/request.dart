@@ -23,53 +23,87 @@ String get host {
 String get baseUrl => "$host/api";
 
 class RequestService {
-  static final Dio _dio = Dio();
+  static late Dio _dio;
   static String? _authToken;
   static bool _isInitialized = false;
 
-  static void initialize() {
-    if (_isInitialized) return;
+  // Initialize RequestService with Dio setup
+  static Future<void> initialize() async {
+    if (_isInitialized) {
+      log('RequestService already initialized');
+      return;
+    }
 
-    _dio.options.baseUrl = baseUrl;
-    _dio.options.connectTimeout = const Duration(seconds: 30);
-    _dio.options.receiveTimeout = const Duration(seconds: 30);
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: baseUrl,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+      ),
+    );
 
+    // Load token first before setting up interceptors
+    await loadAuthToken();
+
+    // Add interceptors for auth token
     _dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (options, handler) {
-          log('REQUEST: ${options.method} ${options.uri}');
-          log('DATA: ${options.data}');
+        onRequest: (options, handler) async {
+          // Get fresh token from storage before each request
+          if (_authToken == null) {
+            await loadAuthToken();
+          }
 
           if (_authToken != null) {
             options.headers['Authorization'] = 'Bearer $_authToken';
           }
-
-          if (options.data is! FormData) {
-            options.headers['Content-Type'] = 'application/json';
-          }
-          options.headers['Accept'] = 'application/json';
-
-          handler.next(options);
+          log('REQUEST: ${options.method} ${options.uri}');
+          log('DATA: ${options.data}');
+          return handler.next(options);
         },
         onResponse: (response, handler) {
           log(
             'RESPONSE: ${response.statusCode} ${response.requestOptions.uri}',
           );
           log('RESPONSE DATA: ${response.data}');
-          handler.next(response);
+          return handler.next(response);
         },
         onError: (error, handler) {
           log('ERROR: ${error.message}');
-          log('ERROR RESPONSE: ${error.response?.data}');
+          if (error.response != null) {
+            log('ERROR RESPONSE: ${error.response?.data}');
+          }
           handler.next(error);
         },
       ),
     );
 
     _isInitialized = true;
-    log('RequestService initialized with baseUrl: $baseUrl');
+    log('RequestService initialized successfully');
   }
 
+  // Load auth token from storage
+  static Future<void> loadAuthToken() async {
+    try {
+      final box = await Hive.openBox(
+        'auth',
+      ); // Changed from 'userBox' to 'auth'
+      final token = box.get('token'); // Changed from 'auth_token' to 'token'
+      if (token != null) {
+        _authToken = token;
+        log('Auth token loaded from storage');
+      } else {
+        log('No auth token found in storage');
+      }
+    } catch (e) {
+      log('Error loading auth token: $e');
+    }
+  }
+
+  // Get current auth token
+  static String? get authToken => _authToken;
+
+  // Check if service is initialized
   static bool get isInitialized => _isInitialized;
 
   // Auth Methods
@@ -91,6 +125,17 @@ class RequestService {
   }
 
   // Student Methods
+  static Future<Map<String, dynamic>?> getStudentProfile(int studentId) async {
+    return get('/students/$studentId');
+  }
+
+  static Future<Map<String, dynamic>?> updateStudentProfile(
+    int studentId,
+    Map<String, dynamic> profileData,
+  ) async {
+    return put('/students/$studentId', profileData);
+  }
+
   static Future<Map<String, dynamic>?> updateStudentInternshipDates(
     int studentId,
     String startDate,
@@ -98,23 +143,24 @@ class RequestService {
     String? workplaceName,
     String? workplaceAddress,
     String? workplaceLocation,
-    int? supervisorId, // ADD THIS
+    int? supervisorId,
     String? supervisorName,
     String? supervisorPhone,
     String? supervisorEmail,
   }) async {
-    return patch('/students/$studentId/internship-dates', {
+    final data = {
       'internship_start_date': startDate,
       'internship_end_date': endDate,
-      'is_first_login': false,
-      'workplace_name': workplaceName,
-      'workplace_address': workplaceAddress,
-      'workplace_location': workplaceLocation,
-      'supervisor_id': supervisorId, // ADD THIS
-      'supervisor_name': supervisorName,
-      'supervisor_phone': supervisorPhone,
-      'supervisor_email': supervisorEmail,
-    });
+      if (workplaceName != null) 'workplace_name': workplaceName,
+      if (workplaceAddress != null) 'workplace_address': workplaceAddress,
+      if (workplaceLocation != null) 'workplace_location': workplaceLocation,
+      if (supervisorId != null) 'supervisor_id': supervisorId,
+      if (supervisorName != null) 'supervisor_name': supervisorName,
+      if (supervisorPhone != null) 'supervisor_phone': supervisorPhone,
+      if (supervisorEmail != null) 'supervisor_email': supervisorEmail,
+    };
+
+    return patch('/students/$studentId/internship-dates', data);
   }
 
   static Future<Map<String, dynamic>?> getStudentDetails(int studentId) async {
@@ -132,6 +178,14 @@ class RequestService {
   }
 
   // Daily Log Methods
+  static Future<Map<String, dynamic>?> getAllDailyLogs(int studentId) async {
+    return get('/logs/student/$studentId');
+  }
+
+  static Future<Map<String, dynamic>?> getDailyLogById(int logId) async {
+    return get('/logs/$logId');
+  }
+
   static Future<Map<String, dynamic>?> createDailyLog(
     Map<String, dynamic> logData, {
     List<File>? attachments,
@@ -255,10 +309,6 @@ class RequestService {
     return get('/logs/student/$studentId');
   }
 
-  static Future<Map<String, dynamic>?> getDailyLogById(int logId) async {
-    return get('/logs/$logId');
-  }
-
   static Future<Map<String, dynamic>?> approveDailyLog(
     int logId,
     String comment,
@@ -284,6 +334,29 @@ class RequestService {
     return delete('/logs/$logId');
   }
 
+  // Notification Methods
+  static Future<Map<String, dynamic>?> getNotifications(int userId) async {
+    return get('/notifications/user/$userId');
+  }
+
+  static Future<Map<String, dynamic>?> markNotificationAsRead(
+    int notificationId,
+  ) async {
+    return put('/notifications/$notificationId/read', {});
+  }
+
+  static Future<Map<String, dynamic>?> markAllNotificationsAsRead(
+    int userId,
+  ) async {
+    return put('/notifications/user/$userId/read-all', {});
+  }
+
+  static Future<Map<String, dynamic>?> deleteNotification(
+    int notificationId,
+  ) async {
+    return delete('/notifications/$notificationId');
+  }
+
   // Supervisor Methods
   static Future<Map<String, dynamic>?> getSupervisorStudents(
     int supervisorId,
@@ -295,6 +368,30 @@ class RequestService {
     int supervisorId,
   ) async {
     return get('/supervisors/$supervisorId/dashboard');
+  }
+
+  // Update supervisor profile
+  static Future<Map<String, dynamic>?> updateSupervisorProfile(
+    int supervisorId,
+    Map<String, dynamic> profileData,
+  ) async {
+    // Update both user and supervisor tables
+    final userUpdateData = {
+      'full_name': profileData['full_name'],
+      'email': profileData['email'],
+      'phone': profileData['phone'],
+    };
+
+    final supervisorUpdateData = {
+      'organization': profileData['organization'],
+      'position': profileData['position'],
+    };
+
+    // Update user table first
+    await put('/users/$supervisorId', userUpdateData);
+
+    // Then update supervisor table
+    return patch('/supervisors/$supervisorId', supervisorUpdateData);
   }
 
   // Generic HTTP Methods
@@ -490,47 +587,23 @@ class RequestService {
     }
   }
 
-  static Future<void> setAuthToken(String token) async {
+  // Auth token management
+  static Future<void> saveAuthToken(String token) async {
     try {
       _authToken = token;
       final box = await Hive.openBox('auth');
       await box.put('token', token);
       log('Auth token saved');
     } catch (e) {
-      log('Error setting auth token: $e');
+      log('Error saving auth token: $e');
     }
   }
 
-  static Future<void> loadAuthToken() async {
-    try {
-      final box = await Hive.openBox('auth');
-      _authToken = box.get('token');
-      if (_authToken != null) {
-        log('Auth token loaded from storage');
-      } else {
-        log('No auth token found in storage');
-      }
-    } catch (e) {
-      log('Error loading auth token: $e');
-    }
-  }
-
-  static Future<void> clearAuthToken() async {
-    try {
-      _authToken = null;
-      final box = await Hive.openBox('auth');
-      await box.delete('token');
-      await box.delete('user_data');
-      log('Auth token cleared');
-    } catch (e) {
-      log('Error clearing auth token: $e');
-    }
-  }
-
+  // User data management
   static Future<void> saveUserData(Map<String, dynamic> userData) async {
     try {
-      final box = await Hive.openBox('auth');
-      await box.put('user_data', dart_convert.jsonEncode(userData));
+      final box = await Hive.openBox('user');
+      await box.put('userData', dart_convert.jsonEncode(userData));
       log('User data saved');
     } catch (e) {
       log('Error saving user data: $e');
@@ -539,17 +612,54 @@ class RequestService {
 
   static Future<Map<String, dynamic>?> loadUserData() async {
     try {
-      final box = await Hive.openBox('auth');
-      final userDataString = box.get('user_data');
+      final box = await Hive.openBox('user');
+      final userDataString = box.get('userData');
       if (userDataString != null) {
-        return Map<String, dynamic>.from(
-          dart_convert.jsonDecode(userDataString),
-        );
+        log('User data loaded from storage');
+        return dart_convert.jsonDecode(userDataString);
       }
+      log('No user data found in storage');
       return null;
     } catch (e) {
       log('Error loading user data: $e');
       return null;
     }
+  }
+
+  static Future<void> clearUserData() async {
+    try {
+      // Clear both auth and user boxes
+      final authBox = await Hive.openBox('auth');
+      await authBox.clear();
+
+      final userBox = await Hive.openBox('user');
+      await userBox.clear();
+
+      _authToken = null;
+      log('User data cleared');
+    } catch (e) {
+      log('Error clearing user data: $e');
+    }
+  }
+
+  static Future<void> clearAllData() async {
+    try {
+      await clearUserData();
+      log('All data cleared');
+    } catch (e) {
+      log('Error clearing all data: $e');
+    }
+  }
+
+  // Get student by ID (for fetching internship dates)
+  static Future<Map<String, dynamic>?> getStudentById(int studentId) async {
+    return get('/students/$studentId');
+  }
+
+  // Get supervisor by ID (for fetching supervisor profile)
+  static Future<Map<String, dynamic>?> getSupervisorById(
+    int supervisorId,
+  ) async {
+    return get('/supervisors/$supervisorId');
   }
 }

@@ -55,7 +55,7 @@ class _LoginState extends State<Login> {
       if (result != null && result['status'] == 'success') {
         // Save token
         final token = result['data']['token'];
-        await RequestService.setAuthToken(token);
+        await RequestService.saveAuthToken(token);
 
         // Get user and role data from response
         final userData = Map<String, dynamic>.from(result['data']['user']);
@@ -78,7 +78,7 @@ class _LoginState extends State<Login> {
         if (userData['role'] == 'student' && roleData != null) {
           final isFirstLogin = roleData['is_first_login'];
 
-          // Check if it's the first login (handle both boolean and int values)
+          // Check if it's the first login (handle boolean, int, and string values)
           if (isFirstLogin == true ||
               isFirstLogin == 1 ||
               isFirstLogin == '1') {
@@ -89,7 +89,7 @@ class _LoginState extends State<Login> {
                 builder: (context) => FirstLoginSetup(userData: fullUserData),
               ),
             );
-            return; // Exit early to prevent showing welcome message
+            return;
           }
         }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
+import 'package:siwes360/screens/student/studentLogbook.dart';
 import 'package:siwes360/screens/student/studentNotifications.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/studentbottomNavBar.dart';
@@ -72,13 +73,36 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
-  String _formatDate(String? dateStr) {
-    if (dateStr == null) return 'Not set';
+  String _formatDate(dynamic dateValue) {
     try {
-      final date = DateTime.parse(dateStr);
+      if (dateValue == null) return 'No date';
+
+      DateTime date;
+
+      if (dateValue is String) {
+        // Check if it's already in YYYY-MM-DD format (no time component)
+        if (dateValue.length == 10 && !dateValue.contains('T')) {
+          // Parse as local date
+          final parts = dateValue.split('-');
+          date = DateTime(
+            int.parse(parts[0]), // year
+            int.parse(parts[1]), // month
+            int.parse(parts[2]), // day
+          );
+        } else {
+          // Parse ISO string but use only the date part
+          date = DateTime.parse(dateValue.split('T')[0]);
+        }
+      } else if (dateValue is DateTime) {
+        date = dateValue;
+      } else {
+        return 'Invalid date';
+      }
+
       return DateFormat('MMM dd, yyyy').format(date);
     } catch (e) {
-      return dateStr;
+      print('Error formatting date: $e');
+      return 'Invalid date';
     }
   }
 
@@ -451,13 +475,19 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.push(
+                      onPressed: () async {
+                        // Navigate and wait for result
+                        final result = await Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (context) => const AddNewLogEntry(),
                           ),
                         );
+
+                        // If a log was created successfully, reload dashboard
+                        if (result == true) {
+                          _loadDashboardData();
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0A3D62),
@@ -496,8 +526,18 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         ),
                       ),
                       TextButton(
-                        onPressed: () {
-                          // Navigate to all logs
+                        onPressed: () async {
+                          // Navigate to all logs and reload on return
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const StudentLogbook(),
+                            ),
+                          );
+
+                          if (result == true) {
+                            _loadDashboardData();
+                          }
                         },
                         child: const Text(
                           'View All',
@@ -637,7 +677,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         ? Row(
                             children: [
                               CircleAvatar(
-                                radius: 30,
+                                radius: 35,
                                 backgroundColor: const Color(0xFF0A3D62),
                                 child: Text(
                                   (supervisor['full_name'] ?? 'S')
@@ -645,12 +685,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                       .toUpperCase(),
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 24,
+                                    fontSize: 28,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 25),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -658,7 +698,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                     Text(
                                       supervisor['full_name'] ?? 'Not Assigned',
                                       style: const TextStyle(
-                                        fontSize: 16,
+                                        fontSize: 18,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
@@ -694,19 +734,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                   ],
                                 ),
                               ),
-                              if (supervisor['user_id'] != null)
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF0A3D62),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.chat_bubble_outline,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                ),
                             ],
                           )
                         : Center(
@@ -736,6 +763,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
                   const SizedBox(height: 30),
 
                   // Statistics Cards
+                  const Text(
+                    'Stats',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+
                   Row(
                     children: [
                       Expanded(
