@@ -1,11 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:siwes360/screens/supervisor/logbookEntryDetail.dart';
-import 'package:siwes360/screens/supervisor/studentLogbookView.dart';
-import 'package:siwes360/screens/supervisor/supervisorStudentsPage.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
 import 'package:siwes360/screens/supervisor/supervisorNotifications.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class SupervisorDashboard extends StatefulWidget {
   const SupervisorDashboard({super.key});
@@ -18,13 +18,33 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   bool _isLoading = true;
   Map<String, dynamic>? _dashboardData;
   String _errorMessage = '';
-  int _unreadNotificationCount = 0; // Add this
+  int _unreadNotificationCount = 0;
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
-    _loadUnreadNotificationCount(); // Add this
+    _loadUnreadNotificationCount();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        final supervisorId = userData['role_data']['user_id'];
+        final box = await Hive.openBox('supervisorProfile');
+        final imagePath = box.get('profile_image_$supervisorId');
+
+        if (imagePath != null && await File(imagePath).exists()) {
+          setState(() {
+            _profileImagePath = imagePath;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   // Add this new method
@@ -70,7 +90,6 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
       }
 
       final supervisorId = userData['role_data']['user_id'];
-
       final result = await RequestService.getSupervisorDashboardData(
         supervisorId,
       );
@@ -83,6 +102,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
 
         // Refresh notification count after loading dashboard
         _loadUnreadNotificationCount();
+        await _loadProfileImage();
       } else {
         setState(() {
           _errorMessage = result?['message'] ?? 'Failed to load dashboard';
@@ -114,28 +134,28 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
     }
   }
 
-  String _getTimeAgo(String? dateStr) {
-    if (dateStr == null) return 'Unknown';
-    try {
-      final date = DateTime.parse(dateStr);
-      final now = DateTime.now();
-      final difference = now.difference(date);
+  // String _getTimeAgo(String? dateStr) {
+  //   if (dateStr == null) return 'Unknown';
+  //   try {
+  //     final date = DateTime.parse(dateStr);
+  //     final now = DateTime.now();
+  //     final difference = now.difference(date);
 
-      if (difference.inDays > 7) {
-        return DateFormat('MMM d').format(date);
-      } else if (difference.inDays > 0) {
-        return '${difference.inDays} ${difference.inDays == 1 ? 'day' : 'days'} ago';
-      } else if (difference.inHours > 0) {
-        return '${difference.inHours} ${difference.inHours == 1 ? 'hour' : 'hours'} ago';
-      } else if (difference.inMinutes > 0) {
-        return '${difference.inMinutes} ${difference.inMinutes == 1 ? 'minute' : 'minutes'} ago';
-      } else {
-        return 'Just now';
-      }
-    } catch (e) {
-      return 'Unknown';
-    }
-  }
+  //     if (difference.inDays > 7) {
+  //       return DateFormat('MMM d').format(date);
+  //     } else if (difference.inDays > 0) {
+  //       return '${difference.inDays} ${difference.inDays == 1 ? 'day' : 'days'} ago';
+  //     } else if (difference.inHours > 0) {
+  //       return '${difference.inHours} ${difference.inHours == 1 ? 'hour' : 'hours'} ago';
+  //     } else if (difference.inMinutes > 0) {
+  //       return '${difference.inMinutes} ${difference.inMinutes == 1 ? 'minute' : 'minutes'} ago';
+  //     } else {
+  //       return 'Just now';
+  //     }
+  //   } catch (e) {
+  //     return 'Unknown';
+  //   }
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +240,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header Section
+                  // Header Section - ONLY THIS CHANGED
                   Row(
                     children: [
                       Container(
@@ -228,20 +248,40 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                         height: 55,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Colors.grey[300],
+                          color: const Color(0xFF0A3D62),
                         ),
                         child: ClipOval(
-                          child: Image.asset(
-                            'assets/images/avatar.jpeg',
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Icon(
-                                Icons.person,
-                                size: 30,
-                                color: Colors.grey[600],
-                              );
-                            },
-                          ),
+                          child: _profileImagePath != null
+                              ? Image.file(
+                                  File(_profileImagePath!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Center(
+                                      child: Text(
+                                        (supervisor?['full_name'] ?? 'U')
+                                            .substring(0, 1)
+                                            .toUpperCase(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                )
+                              : Center(
+                                  child: Text(
+                                    (supervisor?['full_name'] ?? 'U')
+                                        .substring(0, 1)
+                                        .toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -272,19 +312,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           IconButton(
                             icon: const Icon(Icons.notifications_outlined),
                             onPressed: () async {
-                              // Navigate and refresh count when returning
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const SupervisorNotifications(),
-                                ),
+                              await context.pushFade(
+                                const SupervisorNotifications(),
                               );
-                              // Refresh notification count after returning
                               _loadUnreadNotificationCount();
                             },
                           ),
-                          // Show unread notification count instead of pending approvals
                           if (_unreadNotificationCount > 0)
                             Positioned(
                               right: 8,
@@ -361,16 +394,6 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      if (recentApprovals.isNotEmpty)
-                        TextButton(
-                          onPressed: () {
-                            // TODO: View all pending approvals
-                          },
-                          child: const Text(
-                            'View All',
-                            style: TextStyle(color: Color(0xFF0A3D62)),
-                          ),
-                        ),
                     ],
                   ),
 
@@ -534,45 +557,6 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
               fontSize: 36,
               fontWeight: FontWeight.bold,
               color: isOrange ? Colors.orange[800] : Colors.black,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            width: 70,
-            height: 70,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(icon, size: 30, color: const Color(0xFF0A3D62)),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey[700],
-              fontWeight: FontWeight.w500,
             ),
           ),
         ],

@@ -1,8 +1,11 @@
+// ignore_for_file: unused_local_variable
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:siwes360/screens/supervisor/supervisorStudentsPage.dart';
 import 'package:siwes360/screens/supervisor/logbookEntryDetail.dart';
 import 'package:siwes360/utils/request.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
 import 'dart:convert';
 
 class StudentLogbookView extends StatefulWidget {
@@ -223,33 +226,32 @@ class _StudentLogbookViewState extends State<StudentLogbookView> {
                     // Student Info Card
                     Container(
                       decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
                       ),
                       padding: const EdgeInsets.all(20),
                       child: Row(
-                      children: [
-                        Container(
-                        width: 70,
-                        height: 70,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Color(0xFF0A3D62),
-                          
-                        ),
-                        child: Center(
-                          child: Text(
-                          widget.student.name
-                            .substring(0, 1)
-                            .toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
+                        children: [
+                          Container(
+                            width: 70,
+                            height: 70,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(0xFF0A3D62),
+                            ),
+                            child: Center(
+                              child: Text(
+                                widget.student.name
+                                    .substring(0, 1)
+                                    .toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           ),
-                          ),
-                        ),
-                        ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -441,14 +443,11 @@ class _StudentLogbookViewState extends State<StudentLogbookView> {
 
     return GestureDetector(
       onTap: () async {
-        final result = await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => LogbookEntryDetail(
-              student: widget.student,
-              entry: entry,
-              weekNumber: weekNumber,
-            ),
+        final result = await context.pushFade(
+          LogbookEntryDetail(
+            student: widget.student,
+            entry: entry,
+            weekNumber: weekNumber,
           ),
         );
 

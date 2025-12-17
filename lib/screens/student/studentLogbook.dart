@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
@@ -142,17 +144,17 @@ class _StudentLogbookState extends State<StudentLogbook> {
     }
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Colors.green;
-      case 'rejected':
-        return Colors.red;
-      case 'pending':
-      default:
-        return Colors.orange;
-    }
-  }
+  // Color _getStatusColor(String status) {
+  //   switch (status.toLowerCase()) {
+  //     case 'approved':
+  //       return Colors.green;
+  //     case 'rejected':
+  //       return Colors.red;
+  //     case 'pending':
+  //     default:
+  //       return Colors.orange;
+  //   }
+  // }
 
   void _showCalendarPicker() async {
     final DateTime? picked = await showDatePicker(
@@ -178,12 +180,345 @@ class _StudentLogbookState extends State<StudentLogbook> {
       setState(() {
         _selectedCalendarDate = picked;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Selected date: ${picked.toString().split(' ')[0]}'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+
+      // Find logs for the selected date
+      final selectedDateStr = picked.toIso8601String().split('T')[0];
+      final logsOnDate = _allLogs.where((log) {
+        final logDateStr = log['log_date'].toString().split('T')[0];
+        return logDateStr == selectedDateStr;
+      }).toList();
+
+      if (!mounted) return;
+
+      if (logsOnDate.isEmpty) {
+        // No logs found for this date
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'No log entries found for ${DateFormat('MMM d, yyyy').format(picked)}',
+            ),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else {
+        // Sort by created_at to get the latest log
+        logsOnDate.sort((a, b) {
+          final aCreated = DateTime.parse(a['created_at'] ?? a['log_date']);
+          final bCreated = DateTime.parse(b['created_at'] ?? b['log_date']);
+          return bCreated.compareTo(
+            aCreated,
+          ); // Descending order (latest first)
+        });
+
+        final latestLog = logsOnDate.first;
+
+        // Show the log details
+        _showLogDetailsForDate(latestLog, logsOnDate.length);
+      }
+    }
+  }
+
+  void _showLogDetailsForDate(Map<String, dynamic> log, int totalLogsOnDate) {
+    final status = log['status']?.toString() ?? 'pending';
+    final statusColor = _getStatusColor(status);
+    final canEdit =
+        status.toLowerCase() == 'pending' || status.toLowerCase() == 'rejected';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: Color.fromRGBO(252, 242, 232, 1),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              children: [
+                // Handle
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Content
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    DateFormat(
+                                      'MMM d, yyyy',
+                                    ).format(DateTime.parse(log['log_date'])),
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  if (totalLogsOnDate > 1) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Latest of $totalLogsOnDate entries',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _getStatusIcon(status),
+                                    size: 16,
+                                    color: statusColor,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    status.toUpperCase(),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: statusColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Description',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          log['description'] ?? 'No description',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[800],
+                            height: 1.5,
+                          ),
+                        ),
+                        if (log['skills_acquired'] != null) ...[
+                          const SizedBox(height: 24),
+                          const Text(
+                            'Skills Acquired',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            log['skills_acquired'],
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[800],
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
+                        if (log['challenges_faced'] != null) ...[
+                          const SizedBox(height: 24),
+                          const Text(
+                            'Challenges Faced',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            log['challenges_faced'],
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[800],
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
+                        if (log['supervisor_comment'] != null) ...[
+                          const SizedBox(height: 24),
+                          const Divider(),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Supervisor Comment',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0A3D62).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: const Color(0xFF0A3D62).withOpacity(0.2),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                  Icons.chat_bubble_outline,
+                                  size: 16,
+                                  color: Color(0xFF0A3D62),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    log['supervisor_comment'],
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        // Action buttons for pending/rejected entries
+                        if (canEdit) ...[
+                          const SizedBox(height: 32),
+                          const Divider(),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _showDeleteConfirmationForLog(context, log);
+                                  },
+                                  icon: const Icon(Icons.delete_outline),
+                                  label: const Text('Delete'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                    side: const BorderSide(color: Colors.red),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _showEditDialogForLog(context, log);
+                                  },
+                                  icon: const Icon(Icons.edit_outlined),
+                                  label: const Text('Edit'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0A3D62),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showEditDialogForLog(BuildContext context, Map<String, dynamic> log) {
+    // Create a LogEntryCard just to use its edit functionality
+    final card = LogEntryCard(log: log, onLogUpdated: _loadLogbookData);
+    card._showEditDialog(context);
+  }
+
+  void _showDeleteConfirmationForLog(
+    BuildContext context,
+    Map<String, dynamic> log,
+  ) {
+    // Create a LogEntryCard just to use its delete functionality
+    final card = LogEntryCard(log: log, onLogUpdated: _loadLogbookData);
+    card._showDeleteConfirmation(context);
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green;
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+      default:
+        return Colors.orange;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Icons.check_circle;
+      case 'rejected':
+        return Icons.cancel;
+      case 'pending':
+      default:
+        return Icons.pending;
     }
   }
 
@@ -632,7 +967,11 @@ class _StudentLogbookState extends State<StudentLogbook> {
                             ...logsInWeek.map((log) {
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12.0),
-                                child: LogEntryCard(log: log),
+                                child: LogEntryCard(
+                                  log: log,
+                                  onLogUpdated:
+                                      _loadLogbookData, // Add this line
+                                ),
                               );
                             }).toList(),
                             const SizedBox(height: 12),
@@ -672,8 +1011,13 @@ class _StudentLogbookState extends State<StudentLogbook> {
 // Log Entry Card Widget
 class LogEntryCard extends StatelessWidget {
   final Map<String, dynamic> log;
+  final VoidCallback onLogUpdated; // Add this callback
 
-  const LogEntryCard({super.key, required this.log});
+  const LogEntryCard({
+    super.key,
+    required this.log,
+    required this.onLogUpdated, // Add this parameter
+  });
 
   String _formatDate(String? dateStr) {
     if (dateStr == null) return 'N/A';
@@ -709,9 +1053,129 @@ class LogEntryCard extends StatelessWidget {
     }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    final status = log['status']?.toString() ?? 'pending';
+    final statusColor = _getStatusColor(status);
+    final statusIcon = _getStatusIcon(status);
+
+    return InkWell(
+      onTap: () => _showLogDetails(context),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 5,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Status indicator
+            Container(
+              width: 4,
+              height: 60,
+              decoration: BoxDecoration(
+                color: statusColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatDate(log['log_date']),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(statusIcon, size: 12, color: statusColor),
+                            const SizedBox(width: 4),
+                            Text(
+                              status.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: statusColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    log['description'] ?? 'No description',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (log['skills_acquired'] != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.lightbulb_outline,
+                          size: 12,
+                          color: Colors.grey[500],
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            log['skills_acquired'],
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[600],
+                              fontStyle: FontStyle.italic,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right, color: Colors.grey[400]),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showLogDetails(BuildContext context) {
     final status = log['status']?.toString() ?? 'pending';
     final statusColor = _getStatusColor(status);
+    final canEdit =
+        status.toLowerCase() == 'pending' || status.toLowerCase() == 'rejected';
 
     showModalBottomSheet(
       context: context,
@@ -724,7 +1188,12 @@ class LogEntryCard extends StatelessWidget {
         builder: (context, scrollController) {
           return Container(
             decoration: const BoxDecoration(
-              color: Colors.white,
+              color: Color.fromRGBO(
+                252,
+                242,
+                232,
+                1,
+              ), // Changed to match page background
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(
@@ -735,7 +1204,7 @@ class LogEntryCard extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: Colors.grey[400],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -889,6 +1358,59 @@ class LogEntryCard extends StatelessWidget {
                             ),
                           ),
                         ],
+
+                        // Action buttons for pending/rejected entries
+                        if (canEdit) ...[
+                          const SizedBox(height: 32),
+                          const Divider(),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _showDeleteConfirmation(context);
+                                  },
+                                  icon: const Icon(Icons.delete_outline),
+                                  label: const Text('Delete'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                    side: const BorderSide(color: Colors.red),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _showEditDialog(context);
+                                  },
+                                  icon: const Icon(Icons.edit_outlined),
+                                  label: const Text('Edit'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0A3D62),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const SizedBox(height: 20),
                       ],
                     ),
                   ),
@@ -901,105 +1423,346 @@ class LogEntryCard extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final status = log['status']?.toString() ?? 'pending';
-    final statusColor = _getStatusColor(status);
+  void _showEditDialog(BuildContext context) {
+    final TextEditingController descriptionController = TextEditingController(
+      text: log['description'] ?? '',
+    );
+    final TextEditingController skillsController = TextEditingController(
+      text: log['skills_acquired'] ?? '',
+    );
+    final TextEditingController challengesController = TextEditingController(
+      text: log['challenges_faced'] ?? '',
+    );
 
-    return InkWell(
-      onTap: () {
-        _showLogDetails(context);
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    _formatDate(log['log_date']),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          bool isSaving = false;
+
+          return DraggableScrollableSheet(
+            initialChildSize: 0.75,
+            minChildSize: 0.5,
+            maxChildSize: 0.95,
+            builder: (context, scrollController) {
+              return Container(
+                decoration: const BoxDecoration(
+                  color: Color.fromRGBO(252, 242, 232, 1),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _getStatusIcon(status),
-                        size: 14,
-                        color: statusColor,
+                child: Column(
+                  children: [
+                    // Handle
+                    Container(
+                      margin: const EdgeInsets.only(top: 12),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        status.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: statusColor,
+                    ),
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Edit Log Entry',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // Content
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Description *',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: descriptionController,
+                              maxLines: 5,
+                              decoration: InputDecoration(
+                                hintText: 'Describe your activities...',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            const Text(
+                              'Skills Acquired',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: skillsController,
+                              maxLines: 3,
+                              decoration: InputDecoration(
+                                hintText: 'What skills did you learn?',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            const Text(
+                              'Challenges Faced',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: challengesController,
+                              maxLines: 3,
+                              decoration: InputDecoration(
+                                hintText: 'Any challenges or difficulties?',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              log['description'] ?? 'No description',
-              style: TextStyle(fontSize: 14, color: Colors.grey[800]),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (log['skills_acquired'] != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(
-                    Icons.lightbulb_outline,
-                    size: 16,
-                    color: Colors.grey[600],
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      log['skills_acquired'],
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ],
+                    // Save button
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(252, 242, 232, 1),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, -2),
+                          ),
+                        ],
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: isSaving
+                              ? null
+                              : () async {
+                                  if (descriptionController.text
+                                      .trim()
+                                      .isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Description is required',
+                                        ),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setModalState(() {
+                                    isSaving = true;
+                                  });
+
+                                  try {
+                                    final result =
+                                        await RequestService.updateDailyLog(
+                                          log['id'],
+                                          {
+                                            'description': descriptionController
+                                                .text
+                                                .trim(),
+                                            'skills_acquired':
+                                                skillsController.text
+                                                    .trim()
+                                                    .isEmpty
+                                                ? null
+                                                : skillsController.text.trim(),
+                                            'challenges_faced':
+                                                challengesController.text
+                                                    .trim()
+                                                    .isEmpty
+                                                ? null
+                                                : challengesController.text
+                                                      .trim(),
+                                          },
+                                        );
+
+                                    if (!context.mounted) return;
+
+                                    Navigator.pop(context); // Close edit sheet
+
+                                    if (result != null &&
+                                        result['status'] == 'success') {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Log updated successfully',
+                                          ),
+                                          backgroundColor: Colors.green,
+                                        ),
+                                      );
+
+                                      // Call the callback to reload data
+                                      onLogUpdated();
+                                    } else {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            result?['message'] ??
+                                                'Failed to update log',
+                                          ),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (!context.mounted) return;
+
+                                    Navigator.pop(
+                                      context,
+                                    ); // Close edit sheet on error
+
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Error: ${e.toString()}'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0A3D62),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: isSaving
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const Text(
+                                  'Save Changes',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDeleteConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Log Entry'),
+        content: const Text(
+          'Are you sure you want to delete this log entry? This action cannot be undone.',
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext); // Close dialog
+
+              try {
+                final result = await RequestService.deleteDailyLog(log['id']);
+
+                if (!context.mounted) return;
+
+                if (result != null && result['status'] == 'success') {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Log deleted successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+
+                  // Call the callback to reload data
+                  onLogUpdated();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        result?['message'] ?? 'Failed to delete log',
+                      ),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }

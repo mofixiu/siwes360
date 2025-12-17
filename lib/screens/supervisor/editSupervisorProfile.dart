@@ -1,7 +1,12 @@
+// ignore_for_file: unused_local_variable
+
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
 class EditSupervisorProfile extends StatefulWidget {
   final int supervisorId;
@@ -25,11 +30,27 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
   bool _isSaving = false;
   String _errorMessage = '';
   Map<String, dynamic>? _profileData;
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadProfileData();
+    _loadProfileImage();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final box = await Hive.openBox('supervisorProfile');
+      final imagePath = box.get('profile_image_${widget.supervisorId}');
+      if (imagePath != null && await File(imagePath).exists()) {
+        setState(() {
+          _profileImagePath = imagePath;
+        });
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   Future<void> _loadProfileData() async {
@@ -100,12 +121,14 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
   }
 
   Future<void> _changeProfilePhoto() async {
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
+      builder: (BuildContext bottomSheetContext) {
         return Container(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -136,21 +159,8 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                 ),
                 title: const Text('Take Photo'),
                 onTap: () async {
-                  Navigator.pop(context);
-                  final ImagePicker picker = ImagePicker();
-                  final XFile? photo = await picker.pickImage(
-                    source: ImageSource.camera,
-                  );
-                  if (photo != null) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Profile photo updated'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  }
+                  Navigator.pop(bottomSheetContext);
+                  await _pickImage(ImageSource.camera);
                 },
               ),
               ListTile(
@@ -167,29 +177,133 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                 ),
                 title: const Text('Choose from Gallery'),
                 onTap: () async {
-                  Navigator.pop(context);
-                  final ImagePicker picker = ImagePicker();
-                  final XFile? image = await picker.pickImage(
-                    source: ImageSource.gallery,
-                  );
-                  if (image != null) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Profile photo updated'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
-                  }
+                  Navigator.pop(bottomSheetContext);
+                  await _pickImage(ImageSource.gallery);
                 },
               ),
+              if (_profileImagePath != null)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.delete_outline, color: Colors.red),
+                  ),
+                  title: const Text('Remove Photo'),
+                  onTap: () async {
+                    Navigator.pop(bottomSheetContext);
+                    await _removeProfileImage();
+                  },
+                ),
               const SizedBox(height: 20),
             ],
           ),
         );
       },
     );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image == null) return;
+
+      // Get app directory to save the image
+      final Directory appDir = await getApplicationDocumentsDirectory();
+      final String fileName =
+          'supervisor_${widget.supervisorId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String localPath = path.join(appDir.path, fileName);
+
+      // Copy image to app directory
+      final File localImage = await File(image.path).copy(localPath);
+
+      // Delete old image if exists
+      if (_profileImagePath != null) {
+        try {
+          await File(_profileImagePath!).delete();
+        } catch (e) {
+          print('Error deleting old image: $e');
+        }
+      }
+
+      // Save to Hive
+      final box = await Hive.openBox('supervisorProfile');
+      await box.put('profile_image_${widget.supervisorId}', localPath);
+
+      if (mounted) {
+        setState(() {
+          _profileImagePath = localPath;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile photo updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeProfileImage() async {
+    try {
+      // Delete the image file
+      if (_profileImagePath != null) {
+        try {
+          await File(_profileImagePath!).delete();
+        } catch (e) {
+          print('Error deleting image file: $e');
+        }
+      }
+
+      // Remove from Hive
+      final box = await Hive.openBox('supervisorProfile');
+      await box.delete('profile_image_${widget.supervisorId}');
+
+      if (mounted) {
+        setState(() {
+          _profileImagePath = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile photo removed'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _saveChanges() async {
@@ -312,7 +426,6 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
       return Scaffold(
         backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
         appBar: AppBar(
-          backgroundColor: Colors.white,
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.black),
@@ -393,21 +506,48 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                     Container(
                       width: 120,
                       height: 120,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Color(0xFF0A3D62),
+                        color: Colors.grey[100],
                       ),
-                      child: Center(
-                        child: Text(
-                          (_profileData?['full_name'] ?? 'U')
-                              .substring(0, 1)
-                              .toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                      child: ClipOval(
+                        child: _profileImagePath != null
+                            ? Image.file(
+                                File(_profileImagePath!),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: const Color(0xFF0A3D62),
+                                    child: Center(
+                                      child: Text(
+                                        (_profileData?['full_name'] ?? 'U')
+                                            .substring(0, 1)
+                                            .toUpperCase(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 48,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              )
+                            : Container(
+                                color: const Color(0xFF0A3D62),
+                                child: Center(
+                                  child: Text(
+                                    (_profileData?['full_name'] ?? 'U')
+                                        .substring(0, 1)
+                                        .toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 48,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
                       ),
                     ),
                     Positioned(
@@ -700,10 +840,10 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Bio (stored locally only)
-                      Row(
+                      // Bio
+                      const Row(
                         children: [
-                          const Text(
+                          Text(
                             'BIO',
                             style: TextStyle(
                               fontSize: 12,
@@ -711,7 +851,7 @@ class _EditSupervisorProfileState extends State<EditSupervisorProfile> {
                               color: Colors.grey,
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          SizedBox(width: 8),
                         ],
                       ),
                       const SizedBox(height: 8),

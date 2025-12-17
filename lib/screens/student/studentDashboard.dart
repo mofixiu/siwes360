@@ -1,10 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
 import 'package:siwes360/screens/student/studentLogbook.dart';
 import 'package:siwes360/screens/student/studentNotifications.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/studentbottomNavBar.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class StudentDashboard extends StatefulWidget {
   const StudentDashboard({super.key});
@@ -17,11 +20,33 @@ class _StudentDashboardState extends State<StudentDashboard> {
   bool _isLoading = true;
   Map<String, dynamic>? _dashboardData;
   String _errorMessage = '';
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        final studentId = userData['role_data']['user_id'];
+        final box = await Hive.openBox('studentProfile');
+        final imagePath = box.get('profile_image_$studentId');
+
+        if (imagePath != null && await File(imagePath).exists()) {
+          if (mounted) {
+            setState(() {
+              _profileImagePath = imagePath;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   int _parseStatValue(dynamic value) {
@@ -59,6 +84,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
           _dashboardData = result['data'];
           _isLoading = false;
         });
+
+        // Load profile image after dashboard data is loaded
+        await _loadProfileImage();
       } else {
         setState(() {
           _errorMessage = result?['message'] ?? 'Failed to load dashboard data';
@@ -225,24 +253,60 @@ class _StudentDashboardState extends State<StudentDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
+                  // Header with Profile Image
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Row(
                         children: [
-                          CircleAvatar(
-                            radius: 25,
-                            backgroundColor: const Color(0xFF0A3D62),
-                            child: Text(
-                              (student?['full_name'] ?? 'U')
-                                  .substring(0, 1)
-                                  .toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          // Profile Avatar with Image Support
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFF0A3D62),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: ClipOval(
+                              child: _profileImagePath != null
+                                  ? Image.file(
+                                      File(_profileImagePath!),
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                            return Center(
+                                              child: Text(
+                                                (student?['full_name'] ?? 'U')
+                                                    .substring(0, 1)
+                                                    .toUpperCase(),
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        (student?['full_name'] ?? 'U')
+                                            .substring(0, 1)
+                                            .toUpperCase(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -260,13 +324,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           IconButton(
                             icon: const Icon(Icons.notifications_outlined),
                             onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const StudentNotifications(),
-                                ),
-                              );
+                              context.pushFade(const StudentNotifications());
                             },
                           ),
                           if (_parseStatValue(stats?['pending_logs']) > 0)
@@ -477,13 +535,15 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     child: ElevatedButton(
                       onPressed: () async {
                         // Navigate and wait for result
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const AddNewLogEntry(),
-                          ),
+                        // final result = await Navigator.push(
+                        //   context,
+                        //   MaterialPageRoute(
+                        //     builder: (context) => const AddNewLogEntry(),
+                        //   ),
+                        // );
+                        final result = await context.pushSlideUp(
+                          const AddNewLogEntry(),
                         );
-
                         // If a log was created successfully, reload dashboard
                         if (result == true) {
                           _loadDashboardData();
@@ -528,11 +588,14 @@ class _StudentDashboardState extends State<StudentDashboard> {
                       TextButton(
                         onPressed: () async {
                           // Navigate to all logs and reload on return
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const StudentLogbook(),
-                            ),
+                          // final result = await Navigator.push(
+                          //   context,
+                          //   MaterialPageRoute(
+                          //     builder: (context) => const StudentLogbook(),
+                          //   ),
+                          // );
+                          final result = await context.pushFade(
+                            const StudentLogbook(),
                           );
 
                           if (result == true) {

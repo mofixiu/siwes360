@@ -6,6 +6,7 @@ import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/utils/role_router.dart';
 import 'package:siwes360/themes/theme.dart';
 import 'package:siwes360/widgets/customButton.dart';
+import 'package:siwes360/utils/custom_page_route.dart'; // Add this import
 
 class Login extends StatefulWidget {
   const Login({super.key});
@@ -82,12 +83,9 @@ class _LoginState extends State<Login> {
           if (isFirstLogin == true ||
               isFirstLogin == 1 ||
               isFirstLogin == '1') {
-            // Navigate to first login setup
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => FirstLoginSetup(userData: fullUserData),
-              ),
+            // Navigate to first login setup with fade transition
+            await context.pushReplacementFade(
+              FirstLoginSetup(userData: fullUserData),
             );
             return;
           }
@@ -343,12 +341,7 @@ class _LoginState extends State<Login> {
                 SizedBox(height: MediaQuery.of(context).size.height * 0.02),
                 GestureDetector(
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const ForgotPassword(),
-                      ),
-                    );
+                    context.pushFade(const ForgotPassword());
                   },
                   child: const Text(
                     "Forgot Password?",
@@ -418,10 +411,7 @@ class _LoginState extends State<Login> {
                   padding: const EdgeInsets.all(20.0),
                   child: CustomButton(
                     ontap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const SignUp()),
-                      );
+                      context.pushFade(const SignUp());
                     },
                     data: "Create An Account",
                     textcolor: Colors.white,

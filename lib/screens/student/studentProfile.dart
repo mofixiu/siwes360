@@ -1,10 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:siwes360/auth/login.dart';
 import 'package:siwes360/screens/student/editStudentProfile.dart';
 import 'package:siwes360/screens/student/studentSettings.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/studentbottomNavBar.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class StudentProfile extends StatefulWidget {
   const StudentProfile({super.key});
@@ -17,11 +19,33 @@ class _StudentProfileState extends State<StudentProfile> {
   bool _isLoading = true;
   Map<String, dynamic>? _profileData;
   String _errorMessage = '';
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        final studentId = userData['role_data']['user_id'];
+        final box = await Hive.openBox('studentProfile');
+        final imagePath = box.get('profile_image_$studentId');
+
+        if (imagePath != null && await File(imagePath).exists()) {
+          if (mounted) {
+            setState(() {
+              _profileImagePath = imagePath;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -52,6 +76,9 @@ class _StudentProfileState extends State<StudentProfile> {
           _profileData = result['data'];
           _isLoading = false;
         });
+
+        // Load profile image after profile data is loaded
+        await _loadProfileImage();
       } else {
         setState(() {
           _errorMessage = result?['message'] ?? 'Failed to load profile';
@@ -81,58 +108,6 @@ class _StudentProfileState extends State<StudentProfile> {
     final start = _formatDate(_profileData!['internship_start_date']);
     final end = _formatDate(_profileData!['internship_end_date']);
     return '$start - $end';
-  }
-
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Log Out'),
-          content: const Text('Are you sure you want to log out?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                // Show loading
-                Navigator.pop(context); // Close dialog
-
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-                );
-
-                // Clear all stored data
-                await RequestService.clearAllData();
-
-                if (mounted) {
-                  // Close loading dialog
-                  Navigator.pop(context);
-
-                  // Navigate to login and clear stack
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (context) => const Login()),
-                    (route) => false,
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text(
-                'Log Out',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   @override
@@ -221,12 +196,13 @@ class _StudentProfileState extends State<StudentProfile> {
                           color: Color(0xFF0A3D62),
                         ),
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const StudentSettings(),
-                            ),
-                          );
+                          // Navigator.push(
+                          //   context,
+                          //   MaterialPageRoute(
+                          //     builder: (context) => const StudentSettings(),
+                          //   ),
+                          // );
+                          context.pushFade(const StudentSettings());
                         },
                       ),
                     ],
@@ -258,19 +234,32 @@ class _StudentProfileState extends State<StudentProfile> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.orange[100],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: ClipOval(
-                          child: Image.asset(
-                            'assets/images/avatar.jpeg',
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Icon(
-                                Icons.person,
-                                size: 60,
-                                color: Colors.grey[400],
-                              );
-                            },
-                          ),
+                          child: _profileImagePath != null
+                              ? Image.file(
+                                  File(_profileImagePath!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: Colors.grey[400],
+                                    );
+                                  },
+                                )
+                              : Icon(
+                                  Icons.person,
+                                  size: 60,
+                                  color: Colors.grey[400],
+                                ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -310,12 +299,15 @@ class _StudentProfileState extends State<StudentProfile> {
                               return;
                             }
 
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    EditStudentProfile(studentId: studentId),
-                              ),
+                            // final result = await Navigator.push(
+                            //   context,
+                            //   MaterialPageRoute(
+                            //     builder: (context) =>
+                            //         EditStudentProfile(studentId: studentId),
+                            //   ),
+                            // );
+                            final result = await context.pushFade(
+                              EditStudentProfile(studentId: studentId),
                             );
 
                             // Reload profile if changes were saved
@@ -478,40 +470,6 @@ class _StudentProfileState extends State<StudentProfile> {
                 ),
 
                 const SizedBox(height: 20),
-
-                // Log Out Button
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  child: ListTile(
-                    onTap: _showLogoutDialog,
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.logout, color: Colors.red),
-                    ),
-                    title: const Text(
-                      'Log Out',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                    ),
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios,
-                      size: 16,
-                      color: Colors.red,
-                    ),
-                    tileColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-
                 const SizedBox(height: 100),
               ],
             ),

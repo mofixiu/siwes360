@@ -1,10 +1,16 @@
+// ignore_for_file: unused_local_variable
+
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:siwes360/utils/request.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
 class EditStudentProfile extends StatefulWidget {
-  final int studentId; // Change to just accept studentId
+  final int studentId;
 
   const EditStudentProfile({super.key, required this.studentId});
 
@@ -30,11 +36,27 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
   bool _isSaving = false;
   String _errorMessage = '';
   Map<String, dynamic>? _profileData;
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadProfileData();
+    _loadProfileImage();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final box = await Hive.openBox('studentProfile');
+      final imagePath = box.get('profile_image_${widget.studentId}');
+      if (imagePath != null && await File(imagePath).exists()) {
+        setState(() {
+          _profileImagePath = imagePath;
+        });
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   Future<void> _loadProfileData() async {
@@ -44,7 +66,6 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
     });
 
     try {
-      // Fetch fresh profile data from API
       final result = await RequestService.getStudentProfile(widget.studentId);
 
       if (result != null && result['status'] == 'success') {
@@ -52,8 +73,6 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
 
         setState(() {
           _profileData = data;
-
-          // Pre-fill form fields with fetched data
           _companyController.text = data['workplace_name'] ?? '';
           _locationController.text = data['workplace_location'] ?? '';
           _addressController.text = data['workplace_address'] ?? '';
@@ -61,7 +80,6 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
           _supervisorPhoneController.text = data['supervisor_phone'] ?? '';
           _supervisorEmailController.text = data['supervisor_email'] ?? '';
 
-          // Parse dates
           if (data['internship_start_date'] != null) {
             try {
               _startDate = DateTime.parse(data['internship_start_date']);
@@ -106,12 +124,14 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
   }
 
   Future<void> _changeProfilePhoto() async {
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
+      builder: (BuildContext bottomSheetContext) {
         return Container(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -142,19 +162,8 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                 ),
                 title: const Text('Take Photo'),
                 onTap: () async {
-                  Navigator.pop(context);
-                  final ImagePicker picker = ImagePicker();
-                  final XFile? photo = await picker.pickImage(
-                    source: ImageSource.camera,
-                  );
-                  if (photo != null && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Profile photo updated'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
+                  Navigator.pop(bottomSheetContext);
+                  await _pickImage(ImageSource.camera);
                 },
               ),
               ListTile(
@@ -171,27 +180,133 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                 ),
                 title: const Text('Choose from Gallery'),
                 onTap: () async {
-                  Navigator.pop(context);
-                  final ImagePicker picker = ImagePicker();
-                  final XFile? image = await picker.pickImage(
-                    source: ImageSource.gallery,
-                  );
-                  if (image != null && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Profile photo updated'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
+                  Navigator.pop(bottomSheetContext);
+                  await _pickImage(ImageSource.gallery);
                 },
               ),
+              if (_profileImagePath != null)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.delete_outline, color: Colors.red),
+                  ),
+                  title: const Text('Remove Photo'),
+                  onTap: () async {
+                    Navigator.pop(bottomSheetContext);
+                    await _removeProfileImage();
+                  },
+                ),
               const SizedBox(height: 20),
             ],
           ),
         );
       },
     );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image == null) return;
+
+      // Get app directory to save the image
+      final Directory appDir = await getApplicationDocumentsDirectory();
+      final String fileName =
+          'profile_${widget.studentId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String localPath = path.join(appDir.path, fileName);
+
+      // Copy image to app directory
+      final File localImage = await File(image.path).copy(localPath);
+
+      // Delete old image if exists
+      if (_profileImagePath != null) {
+        try {
+          await File(_profileImagePath!).delete();
+        } catch (e) {
+          print('Error deleting old image: $e');
+        }
+      }
+
+      // Save to Hive
+      final box = await Hive.openBox('studentProfile');
+      await box.put('profile_image_${widget.studentId}', localPath);
+
+      if (mounted) {
+        setState(() {
+          _profileImagePath = localPath;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile photo updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeProfileImage() async {
+    try {
+      // Delete the image file
+      if (_profileImagePath != null) {
+        try {
+          await File(_profileImagePath!).delete();
+        } catch (e) {
+          print('Error deleting image file: $e');
+        }
+      }
+
+      // Remove from Hive
+      final box = await Hive.openBox('studentProfile');
+      await box.delete('profile_image_${widget.studentId}');
+
+      if (mounted) {
+        setState(() {
+          _profileImagePath = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile photo removed'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _selectDate(BuildContext context, bool isStartDate) async {
@@ -262,15 +377,13 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
     });
 
     try {
-      // Format dates as YYYY-MM-DD for MySQL DATE columns
       final startDateFormatted = DateFormat('yyyy-MM-dd').format(_startDate!);
       final endDateFormatted = DateFormat('yyyy-MM-dd').format(_endDate!);
 
-      // Update internship details
       final result = await RequestService.updateStudentInternshipDates(
         widget.studentId,
-        startDateFormatted, // Send as YYYY-MM-DD string
-        endDateFormatted, // Send as YYYY-MM-DD string
+        startDateFormatted,
+        endDateFormatted,
         workplaceName: _companyController.text.trim(),
         workplaceAddress: _addressController.text.trim(),
         workplaceLocation: _locationController.text.trim(),
@@ -289,11 +402,10 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
           ),
         );
 
-        // Wait a bit to show the success message
         await Future.delayed(const Duration(milliseconds: 500));
 
         if (mounted) {
-          Navigator.pop(context, true); // Return true to indicate success
+          Navigator.pop(context, true);
         }
       } else {
         throw Exception(result?['message'] ?? 'Failed to update profile');
@@ -444,17 +556,23 @@ class _EditStudentProfileState extends State<EditStudentProfile> {
                         color: Colors.orange[100],
                       ),
                       child: ClipOval(
-                        child: Image.asset(
-                          'assets/images/avatar.jpeg',
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Icon(
-                              Icons.person,
-                              size: 60,
-                              color: Colors.grey[400],
-                            );
-                          },
-                        ),
+                        child: _profileImagePath != null
+                            ? Image.file(
+                                File(_profileImagePath!),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Icon(
+                                    Icons.person,
+                                    size: 60,
+                                    color: Colors.grey[400],
+                                  );
+                                },
+                              )
+                            : Icon(
+                                Icons.person,
+                                size: 60,
+                                color: Colors.grey[400],
+                              ),
                       ),
                     ),
                     Positioned(

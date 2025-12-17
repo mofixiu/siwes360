@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/screens/student/studentDashboard.dart';
 import 'package:siwes360/screens/supervisor/supervisorDashboard.dart';
+import 'package:siwes360/utils/custom_page_route.dart'; // Add this import
 
 class RoleRouter {
   static Widget getHomeScreen(String role) {
@@ -21,9 +22,7 @@ class RoleRouter {
   }
 
   static void navigateToRoleBasedHome(BuildContext context, String role) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => getHomeScreen(role)),
-    );
+    // Use fade transition for smooth navigation to dashboard
+    context.pushReplacementFade(getHomeScreen(role));
   }
 }

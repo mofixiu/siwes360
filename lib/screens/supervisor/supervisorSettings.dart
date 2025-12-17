@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:siwes360/auth/login.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:siwes360/utils/request.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class SupervisorSettings extends StatefulWidget {
   const SupervisorSettings({super.key});
@@ -17,11 +19,31 @@ class _SupervisorSettingsState extends State<SupervisorSettings> {
   bool _biometricLogin = false;
   bool _isLoading = true;
   Map<String, dynamic>? _profileData;
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadProfileData();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        final supervisorId = userData['role_data']['user_id'];
+        final box = await Hive.openBox('supervisorProfile');
+        final imagePath = box.get('profile_image_$supervisorId');
+
+        if (imagePath != null && await File(imagePath).exists()) {
+          setState(() {
+            _profileImagePath = imagePath;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   Future<void> _loadProfileData() async {
@@ -46,6 +68,8 @@ class _SupervisorSettingsState extends State<SupervisorSettings> {
           _profileData = result['data'];
           _isLoading = false;
         });
+
+        await _loadProfileImage();
       } else {
         setState(() {
           _isLoading = false;
@@ -80,10 +104,11 @@ class _SupervisorSettingsState extends State<SupervisorSettings> {
 
                 if (mounted) {
                   // Navigate to login screen and remove all previous routes
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (context) => const Login()),
-                    (route) => false,
-                  );
+                  // Navigator.of(context).pushAndRemoveUntil(
+                  //   MaterialPageRoute(builder: (context) => const Login()),
+                  //   (route) => false,
+                  // );
+                  context.pushReplacementFade(const Login());
                 }
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -301,7 +326,7 @@ class _SupervisorSettingsState extends State<SupervisorSettings> {
                 children: [
                   const SizedBox(height: 20),
 
-                  // Profile Card
+                  // Profile Card - ONLY THIS CHANGED
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
                     padding: const EdgeInsets.all(20),
@@ -320,17 +345,40 @@ class _SupervisorSettingsState extends State<SupervisorSettings> {
                                 shape: BoxShape.circle,
                                 color: Color(0xFF0A3D62),
                               ),
-                              child: Center(
-                                child: Text(
-                                  (_profileData?['full_name'] ?? 'U')
-                                      .substring(0, 1)
-                                      .toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                              child: ClipOval(
+                                child: _profileImagePath != null
+                                    ? Image.file(
+                                        File(_profileImagePath!),
+                                        fit: BoxFit.cover,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                              return Center(
+                                                child: Text(
+                                                  (_profileData?['full_name'] ??
+                                                          'U')
+                                                      .substring(0, 1)
+                                                      .toUpperCase(),
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 28,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                      )
+                                    : Center(
+                                        child: Text(
+                                          (_profileData?['full_name'] ?? 'U')
+                                              .substring(0, 1)
+                                              .toUpperCase(),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
                               ),
                             ),
                           ],
@@ -589,7 +637,7 @@ class _SupervisorSettingsState extends State<SupervisorSettings> {
 
                   // App Version
                   Text(
-                    'SIWES Logbook App v2.4.0',
+                    'SIWES Logbook App v1.0.1',
                     style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                   ),
                   const SizedBox(height: 4),

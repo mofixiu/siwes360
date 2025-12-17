@@ -30,7 +30,6 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
     });
 
     try {
-      // Load user data from storage
       final userData = await RequestService.loadUserData();
 
       if (userData == null || userData['role_data'] == null) {
@@ -42,22 +41,26 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
       }
 
       final supervisorId = userData['role_data']['user_id'];
-
-      // Fetch notifications from API
       final result = await RequestService.getNotifications(supervisorId);
 
       if (result != null && result['status'] == 'success') {
-        final notifications = result['data'] as List? ?? [];
+        final notificationsList = result['data'] as List? ?? [];
 
         setState(() {
-          _allNotifications = notifications.map((n) {
+          _allNotifications = notificationsList.map((notification) {
             return NotificationItem(
-              id: n['id'],
-              type: _getNotificationType(n['message']),
-              title: _getNotificationTitle(n['message']),
-              message: n['message'] ?? '',
-              timestamp: DateTime.parse(n['created_at']),
-              isRead: n['is_read'] == 1 || n['is_read'] == true,
+              id: notification['id'],
+              type: _getNotificationType(
+                notification['type'] ?? notification['message'],
+              ),
+              title: _getNotificationTitle(
+                notification['type'] ?? notification['message'],
+              ),
+              message: notification['message'],
+              timestamp: DateTime.parse(notification['created_at']),
+              isRead:
+                  notification['is_read'] == 1 ||
+                  notification['is_read'] == true,
             );
           }).toList();
           _isLoading = false;
@@ -76,30 +79,28 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
     }
   }
 
-  NotificationType _getNotificationType(String message) {
-    final lowerMessage = message.toLowerCase();
-    if (lowerMessage.contains('logbook') ||
-        lowerMessage.contains('log entry')) {
+  NotificationType _getNotificationType(String typeOrMessage) {
+    final lower = typeOrMessage.toLowerCase();
+    if (lower.contains('submitted') || lower.contains('logbook')) {
       return NotificationType.logbook;
-    } else if (lowerMessage.contains('student') ||
-        lowerMessage.contains('assigned')) {
+    } else if (lower.contains('student') || lower.contains('assigned')) {
       return NotificationType.student;
-    } else if (lowerMessage.contains('review') ||
-        lowerMessage.contains('approval')) {
+    } else if (lower.contains('review') || lower.contains('pending')) {
       return NotificationType.review;
-    } else if (lowerMessage.contains('reminder')) {
+    } else if (lower.contains('reminder') || lower.contains('due')) {
       return NotificationType.reminder;
     } else {
       return NotificationType.system;
     }
   }
 
-  String _getNotificationTitle(String message) {
-    // Extract a title from the message
-    if (message.contains('submitted')) return 'New Log Submission';
-    if (message.contains('pending')) return 'Pending Review';
-    if (message.contains('assigned')) return 'New Student Assigned';
-    if (message.contains('reminder')) return 'Reminder';
+  String _getNotificationTitle(String typeOrMessage) {
+    final lower = typeOrMessage.toLowerCase();
+    if (lower.contains('submitted')) return 'New Logbook Submission';
+    if (lower.contains('student')) return 'Student Assignment';
+    if (lower.contains('review')) return 'Review Required';
+    if (lower.contains('pending')) return 'Pending Action';
+    if (lower.contains('reminder')) return 'Reminder';
     return 'Notification';
   }
 
@@ -120,7 +121,7 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
         notification.isRead = true;
       });
     } catch (e) {
-      // Handle error silently or show snackbar
+      print('Error marking notification as read: $e');
     }
   }
 
@@ -128,8 +129,8 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
     try {
       final userData = await RequestService.loadUserData();
       if (userData != null && userData['role_data'] != null) {
-        final userId = userData['role_data']['user_id'];
-        await RequestService.markAllNotificationsAsRead(userId);
+        final supervisorId = userData['role_data']['user_id'];
+        await RequestService.markAllNotificationsAsRead(supervisorId);
 
         setState(() {
           for (var notification in _allNotifications) {
@@ -153,6 +154,7 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
           SnackBar(
             content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -170,7 +172,7 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Notification deleted'),
-            backgroundColor: Color(0xFF0A3D62),
+            backgroundColor: Colors.orange,
             duration: Duration(seconds: 2),
           ),
         );
@@ -179,135 +181,92 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error deleting notification: ${e.toString()}'),
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
     }
   }
 
-  void _showNotificationDetails(NotificationItem notification) {
-    if (!notification.isRead) {
-      _markAsRead(notification.id);
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            'Notifications',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(color: Color(0xFF0A3D62)),
+        ),
+      );
     }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        builder: (context, scrollController) {
-          return Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    if (_errorMessage.isNotEmpty) {
+      return Scaffold(
+        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            'Notifications',
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
             ),
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
                 ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            _getNotificationIcon(notification.type),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                notification.title,
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _formatTimestamp(notification.timestamp),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          notification.message,
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey[800],
-                            height: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  _deleteNotification(notification.id);
-                                  Navigator.pop(context);
-                                },
-                                icon: const Icon(Icons.delete_outline),
-                                label: const Text('Delete'),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.red,
-                                  side: const BorderSide(color: Colors.red),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => Navigator.pop(context),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0A3D62),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
-                                ),
-                                child: const Text(
-                                  'Close',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _loadNotifications,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0A3D62),
+                  ),
+                  child: const Text(
+                    'Retry',
+                    style: TextStyle(color: Colors.white),
                   ),
                 ),
               ],
             ),
-          );
-        },
-      ),
-    );
-  }
+          ),
+        ),
+      );
+    }
 
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
       appBar: AppBar(
@@ -327,15 +286,16 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
         centerTitle: true,
         actions: [
           if (_unreadNotifications.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.done_all, color: Color(0xFF0A3D62)),
+            TextButton(
               onPressed: _markAllAsRead,
-              tooltip: 'Mark all as read',
+              child: const Text(
+                'Mark all read',
+                style: TextStyle(color: Color(0xFF0A3D62)),
+              ),
             ),
           IconButton(
-            icon: const Icon(Icons.refresh, color: Color(0xFF0A3D62)),
+            icon: const Icon(Icons.refresh, color: Colors.black),
             onPressed: _loadNotifications,
-            tooltip: 'Refresh',
           ),
         ],
         bottom: TabBar(
@@ -343,95 +303,82 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
           labelColor: const Color(0xFF0A3D62),
           unselectedLabelColor: Colors.grey,
           indicatorColor: const Color(0xFF0A3D62),
-          indicatorWeight: 3,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w600),
           tabs: [
-            Tab(text: 'All (${_allNotifications.length})'),
-            Tab(text: 'Unread (${_unreadNotifications.length})'),
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('Unread'),
+                  if (_unreadNotifications.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0A3D62),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${_unreadNotifications.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Tab(text: 'All'),
           ],
         ),
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF0A3D62)),
-            )
-          : _errorMessage.isNotEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadNotifications,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0A3D62),
-                    ),
-                    child: const Text(
-                      'Retry',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildNotificationsList(_allNotifications),
-                _buildNotificationsList(_unreadNotifications),
-              ],
-            ),
+      body: RefreshIndicator(
+        onRefresh: _loadNotifications,
+        color: const Color(0xFF0A3D62),
+        child: TabBarView(
+          controller: _tabController,
+          children: [
+            // Unread tab
+            _unreadNotifications.isEmpty
+                ? _buildEmptyState('No unread notifications')
+                : _buildNotificationList(_unreadNotifications),
+            // All tab
+            _allNotifications.isEmpty
+                ? _buildEmptyState('No notifications yet')
+                : _buildNotificationList(_allNotifications),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildNotificationsList(List<NotificationItem> notifications) {
-    if (notifications.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.notifications_off_outlined,
-              size: 80,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No notifications',
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'You\'re all caught up!',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadNotifications,
-      color: const Color(0xFF0A3D62),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(20),
-        itemCount: notifications.length,
-        itemBuilder: (context, index) {
-          final notification = notifications[index];
-          return _buildNotificationCard(notification);
-        },
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.notifications_none, size: 80, color: Colors.grey[300]),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildNotificationList(List<NotificationItem> notifications) {
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: notifications.length,
+      itemBuilder: (context, index) {
+        return _buildNotificationCard(notifications[index]);
+      },
     );
   }
 
@@ -440,13 +387,12 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
       key: Key(notification.id.toString()),
       direction: DismissDirection.endToStart,
       background: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
           color: Colors.red,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
         ),
-        alignment: Alignment.centerRight,
         child: const Icon(Icons.delete, color: Colors.white),
       ),
       onDismissed: (direction) {
@@ -455,26 +401,17 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: notification.isRead
-              ? Colors.white
-              : const Color(0xFF0A3D62).withOpacity(0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: notification.isRead
-                ? Colors.white
-                : const Color(0xFF0A3D62).withOpacity(0.2),
-            width: 1,
-          ),
+          color: notification.isRead ? Colors.white : Colors.blue[50],
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 5,
               offset: const Offset(0, 2),
             ),
           ],
         ),
         child: ListTile(
-          onTap: () => _showNotificationDetails(notification),
           contentPadding: const EdgeInsets.all(16),
           leading: _getNotificationIcon(notification.type),
           title: Row(
@@ -507,7 +444,7 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
               const SizedBox(height: 8),
               Text(
                 notification.message,
-                maxLines: 2,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 13,
@@ -522,11 +459,11 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
               ),
             ],
           ),
-          trailing: const Icon(
-            Icons.arrow_forward_ios,
-            size: 14,
-            color: Colors.grey,
-          ),
+          onTap: () {
+            if (!notification.isRead) {
+              _markAsRead(notification.id);
+            }
+          },
         ),
       ),
     );
@@ -538,7 +475,7 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
 
     switch (type) {
       case NotificationType.logbook:
-        icon = Icons.book_outlined;
+        icon = Icons.description_outlined;
         color = const Color(0xFF0A3D62);
         break;
       case NotificationType.student:
@@ -551,11 +488,11 @@ class _SupervisorNotificationsState extends State<SupervisorNotifications>
         break;
       case NotificationType.reminder:
         icon = Icons.notifications_active_outlined;
-        color = Colors.purple;
+        color = Colors.red;
         break;
       case NotificationType.system:
         icon = Icons.info_outline;
-        color = Colors.grey;
+        color = Colors.purple;
         break;
     }
 

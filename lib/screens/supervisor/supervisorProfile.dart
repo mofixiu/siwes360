@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:siwes360/screens/supervisor/editSupervisorProfile.dart';
 import 'package:siwes360/screens/supervisor/supervisorSettings.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -20,12 +22,32 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
   List<Map<String, dynamic>> _institutions = [];
   String _errorMessage = '';
   String _bio = '';
+  String? _profileImagePath;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
     _loadBio();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        final supervisorId = userData['role_data']['user_id'];
+        final box = await Hive.openBox('supervisorProfile');
+        final imagePath = box.get('profile_image_$supervisorId');
+
+        if (imagePath != null && await File(imagePath).exists()) {
+          setState(() {
+            _profileImagePath = imagePath;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -35,7 +57,6 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
     });
 
     try {
-      // Load user data from storage
       final userData = await RequestService.loadUserData();
 
       if (userData == null || userData['role_data'] == null) {
@@ -47,8 +68,6 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
       }
 
       final supervisorId = userData['role_data']['user_id'];
-
-      // Fetch supervisor profile from API
       final result = await RequestService.getSupervisorById(supervisorId);
 
       if (result != null && result['status'] == 'success') {
@@ -56,8 +75,8 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
           _profileData = result['data'];
         });
 
-        // Fetch students
         await _loadStudents(supervisorId);
+        await _loadProfileImage();
       } else {
         setState(() {
           _errorMessage = result?['message'] ?? 'Failed to load profile';
@@ -199,12 +218,7 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
                           color: Color(0xFF0A3D62),
                         ),
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const SupervisorSettings(),
-                            ),
-                          );
+                          context.pushFade(const SupervisorSettings());
                         },
                       ),
                     ],
@@ -222,7 +236,7 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
                   ),
                   child: Column(
                     children: [
-                      // Profile Picture
+                      // Profile Picture with Image Support
                       Container(
                         width: 120,
                         height: 120,
@@ -230,17 +244,38 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
                           shape: BoxShape.circle,
                           color: const Color(0xFF0A3D62),
                         ),
-                        child: Center(
-                          child: Text(
-                            (_profileData?['full_name'] ?? 'U')
-                                .substring(0, 1)
-                                .toUpperCase(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 48,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                        child: ClipOval(
+                          child: _profileImagePath != null
+                              ? Image.file(
+                                  File(_profileImagePath!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Center(
+                                      child: Text(
+                                        (_profileData?['full_name'] ?? 'U')
+                                            .substring(0, 1)
+                                            .toUpperCase(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 48,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                )
+                              : Center(
+                                  child: Text(
+                                    (_profileData?['full_name'] ?? 'U')
+                                        .substring(0, 1)
+                                        .toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 48,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -277,12 +312,9 @@ class _SupervisorProfileState extends State<SupervisorProfile> {
                         height: 50,
                         child: ElevatedButton(
                           onPressed: () async {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => EditSupervisorProfile(
-                                  supervisorId: _profileData!['user_id'],
-                                ),
+                            final result = await context.pushFade(
+                              EditSupervisorProfile(
+                                supervisorId: _profileData!['user_id'],
                               ),
                             );
 

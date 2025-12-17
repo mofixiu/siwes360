@@ -1,6 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:siwes360/auth/login.dart';
 import 'package:siwes360/screens/student/studentProfile.dart';
+import 'package:siwes360/utils/custom_page_route.dart';
+import 'package:siwes360/utils/request.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class StudentSettings extends StatefulWidget {
   const StudentSettings({super.key});
@@ -12,6 +17,32 @@ class StudentSettings extends StatefulWidget {
 class _StudentSettingsState extends State<StudentSettings> {
   bool _pushNotifications = true;
   bool _biometricLogin = false;
+  String? _profileImagePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileImage();
+  }
+
+  Future<void> _loadProfileImage() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData != null && userData['role_data'] != null) {
+        final studentId = userData['role_data']['user_id'];
+        final box = await Hive.openBox('studentProfile');
+        final imagePath = box.get('profile_image_$studentId');
+
+        if (imagePath != null && await File(imagePath).exists()) {
+          setState(() {
+            _profileImagePath = imagePath;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
+  }
 
   void _showLogoutDialog() {
     showDialog(
@@ -26,10 +57,37 @@ class _StudentSettingsState extends State<StudentSettings> {
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () {
-                // Add logout logic here
-                Navigator.pop(context);
-                // Navigate to login page
+              onPressed: () async {
+                // Show loading
+                Navigator.pop(context); // Close dialog
+
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                );
+
+                // Clear all stored data
+                await RequestService.clearAllData();
+
+                if (mounted) {
+                  // Close loading dialog
+                  Navigator.pop(context);
+
+                  // Navigate to login and clear stack
+                  // Navigator.pushAndRemoveUntil(
+                  //   context,
+                  //   MaterialPageRoute(builder: (context) => const Login()),
+                  //   (route) => false,
+                  // );
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    FadePageRoute(page: const Login()),
+                    (route) => false,
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               child: const Text(
@@ -207,7 +265,7 @@ class _StudentSettingsState extends State<StudentSettings> {
           children: [
             const SizedBox(height: 20),
 
-            // Profile Card
+            // Profile Card - ONLY THIS PART CHANGED
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 20),
               padding: const EdgeInsets.all(20),
@@ -234,33 +292,23 @@ class _StudentSettingsState extends State<StudentSettings> {
                           color: Colors.orange[100],
                         ),
                         child: ClipOval(
-                          child: Image.asset(
-                            'assets/images/avatar.jpeg',
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Icon(
-                                Icons.person,
-                                size: 30,
-                                color: Colors.grey[400],
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF0A3D62),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.check,
-                            color: Colors.white,
-                            size: 12,
-                          ),
+                          child: _profileImagePath != null
+                              ? Image.file(
+                                  File(_profileImagePath!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Icon(
+                                      Icons.person,
+                                      size: 30,
+                                      color: Colors.grey[400],
+                                    );
+                                  },
+                                )
+                              : Icon(
+                                  Icons.person,
+                                  size: 30,
+                                  color: Colors.grey[400],
+                                ),
                         ),
                       ),
                     ],
@@ -340,13 +388,13 @@ class _StudentSettingsState extends State<StudentSettings> {
                     icon: Icons.person_outline,
                     iconColor: const Color(0xFF0A3D62),
                     title: 'Personal Information',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const StudentProfile(),
-                        ),
+                    onTap: () async {
+                      final result = await context.pushFade(
+                        const StudentProfile(),
                       );
+                      if (result == true) {
+                        _loadProfileImage(); // Reload image if profile was updated
+                      }
                     },
                   ),
                   Divider(height: 1, color: Colors.grey[200]),
@@ -354,13 +402,13 @@ class _StudentSettingsState extends State<StudentSettings> {
                     icon: Icons.business_center_outlined,
                     iconColor: const Color(0xFF0A3D62),
                     title: 'Internship Details',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const StudentProfile(),
-                        ),
+                    onTap: () async {
+                      final result = await context.pushFade(
+                        const StudentProfile(),
                       );
+                      if (result == true) {
+                        _loadProfileImage(); // Reload image if profile was updated
+                      }
                     },
                   ),
                 ],
@@ -516,6 +564,11 @@ class _StudentSettingsState extends State<StudentSettings> {
                     fontSize: 16,
                   ),
                 ),
+                trailing: const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 16,
+                  color: Colors.red,
+                ),
                 tileColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -527,7 +580,7 @@ class _StudentSettingsState extends State<StudentSettings> {
 
             // App Version
             Text(
-              'SIWES Logbook App v2.4.0',
+              'SIWES Logbook App v1.0.1',
               style: TextStyle(fontSize: 12, color: Colors.grey[400]),
             ),
             const SizedBox(height: 4),
