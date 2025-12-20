@@ -5,7 +5,6 @@ import 'package:siwes360/utils/custom_page_route.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
 import 'package:siwes360/screens/supervisor/supervisorNotifications.dart';
-import 'package:siwes360/screens/supervisor/logbookEntryDetail.dart';
 import 'package:siwes360/screens/supervisor/simpleLogbookEntryDetail.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 

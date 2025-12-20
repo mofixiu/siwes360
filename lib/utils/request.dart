@@ -394,6 +394,28 @@ class RequestService {
     return patch('/supervisors/$supervisorId', supervisorUpdateData);
   }
 
+  // Password Reset Methods
+  static Future<Map<String, dynamic>?> forgotPassword(String email) async {
+    return post('/auth/forgot-password', {'email': email});
+  }
+
+  static Future<Map<String, dynamic>?> verifyResetOTP(
+    String email,
+    String otp,
+  ) async {
+    return post('/auth/verify-reset-otp', {'email': email, 'otp': otp});
+  }
+
+  static Future<Map<String, dynamic>?> resetPassword(
+    String resetToken,
+    String newPassword,
+  ) async {
+    return post('/auth/reset-password', {
+      'reset_token': resetToken,
+      'new_password': newPassword,
+    });
+  }
+
   // Generic HTTP Methods
   static Future<Map<String, dynamic>?> post(
     String path,
