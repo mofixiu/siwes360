@@ -440,8 +440,20 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         ),
                         const SizedBox(height: 30),
                         Text(
+                          'Start Date: ${_formatDate(student?['internship_start_date'])}',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+
+                        Text(
                           'End Date: ${_formatDate(student?['internship_end_date'])}',
-                          style: TextStyle(color: Colors.grey[600]),
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
                         ),
                       ],
                     ),
@@ -561,7 +573,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           Icon(Icons.edit_outlined, color: Colors.white),
                           SizedBox(width: 8),
                           Text(
-                            'Write New Log Entry',
+                            'Write New Logbook Entry',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,

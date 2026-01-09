@@ -72,7 +72,7 @@ class _SplashScreenState extends State<SplashScreen>
     try {
       // Initialize RequestService first and WAIT for it
       if (!RequestService.isInitialized) {
-        await RequestService.initialize(); // Add await here!
+        await RequestService.initialize();
       }
 
       // Load token from storage
@@ -90,48 +90,75 @@ class _SplashScreenState extends State<SplashScreen>
 
       if (!mounted) return;
 
-      // If both token and user data exist, navigate to role-based dashboard
+      // If both token and user data exist, try to validate the token
       if (token != null &&
           token.isNotEmpty &&
           userData != null &&
           userData['role'] != null) {
-        final role = userData['role'];
+        // Try to fetch profile to validate token
+        try {
+          final profileResult = await RequestService.getProfile();
 
-        print('✅ Auto-login successful for role: $role');
+          if (profileResult != null && profileResult['status'] == 'success') {
+            // Token is valid, navigate to role-based dashboard
+            final role = userData['role'];
+            print('✅ Auto-login successful for role: $role');
 
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                RoleRouter.getHomeScreen(role),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
-            transitionDuration: const Duration(milliseconds: 500),
-          ),
-        );
-      } else {
-        print('❌ No valid session found, redirecting to login');
-        print('Token is null: ${token == null}');
-        print('Token is empty: ${token?.isEmpty}');
-        print('UserData is null: ${userData == null}');
-        print('Role is null: ${userData?['role'] == null}');
+            Navigator.of(context).pushReplacement(
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) =>
+                    RoleRouter.getHomeScreen(role),
+                transitionsBuilder:
+                    (context, animation, secondaryAnimation, child) {
+                      return FadeTransition(opacity: animation, child: child);
+                    },
+                transitionDuration: const Duration(milliseconds: 500),
+              ),
+            );
+            return;
+          }
+        } catch (e) {
+          // Token validation failed, clear data and redirect to login
+          print('❌ Token validation failed: $e');
+          await RequestService.clearUserData();
 
-        // No valid session, navigate to login
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                const Login(),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
-            transitionDuration: const Duration(milliseconds: 500),
-          ),
-        );
+          if (!mounted) return;
+
+          Navigator.of(context).pushReplacement(
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) =>
+                  const Login(),
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+              transitionDuration: const Duration(milliseconds: 500),
+            ),
+          );
+          return;
+        }
       }
+
+      print('❌ No valid session found, redirecting to login');
+      // Clear any invalid data
+      await RequestService.clearUserData();
+
+      // Navigate to login
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const Login(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 500),
+        ),
+      );
     } catch (e) {
       print('❌ Auth check error: $e');
+
+      // Clear any potentially corrupted data
+      await RequestService.clearUserData();
 
       if (!mounted) return;
 
