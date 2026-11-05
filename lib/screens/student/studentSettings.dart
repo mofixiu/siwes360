@@ -18,11 +18,30 @@ class _StudentSettingsState extends State<StudentSettings> {
   bool _pushNotifications = true;
   bool _biometricLogin = false;
   String? _profileImagePath;
+  Map<String, dynamic>? _profileData;
 
   @override
   void initState() {
     super.initState();
     _loadProfileImage();
+    _loadProfile();
+  }
+
+  // The header shows the signed-in student's own details.
+  Future<void> _loadProfile() async {
+    try {
+      final userData = await RequestService.loadUserData();
+      if (userData == null || userData['role_data'] == null) return;
+      final studentId = userData['role_data']['user_id'];
+      final result = await RequestService.getStudentProfile(studentId);
+      if (mounted && result != null && result['status'] == 'success') {
+        setState(() {
+          _profileData = result['data'];
+        });
+      }
+    } catch (e) {
+      print('Error loading profile: $e');
+    }
   }
 
   Future<void> _loadProfileImage() async {
@@ -318,25 +337,25 @@ class _StudentSettingsState extends State<StudentSettings> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Ebo Mofiyinfoluwa',
-                          style: TextStyle(
+                        Text(
+                          _profileData?['full_name'] ?? 'Student',
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '22CG031849',
+                          _profileData?['matric_no'] ?? '',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey[600],
                           ),
                         ),
                         const SizedBox(height: 2),
-                        const Text(
-                          'Computer Science',
-                          style: TextStyle(
+                        Text(
+                          _profileData?['department'] ?? '',
+                          style: const TextStyle(
                             fontSize: 12,
                             color: Color(0xFF0A3D62),
                             fontWeight: FontWeight.w500,
