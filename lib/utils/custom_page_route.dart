@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:siwes360/theme/tokens.dart';
 
 /// Custom page route with smooth fade transition
 class FadePageRoute<T> extends PageRouteBuilder<T> {
@@ -6,7 +7,7 @@ class FadePageRoute<T> extends PageRouteBuilder<T> {
 
   FadePageRoute({required this.page})
     : super(
-        pageBuilder: (context, animation, secondaryAnimation) => page,
+        pageBuilder: (context, animation, secondaryAnimation) => OnPaper(child: page),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
@@ -21,7 +22,7 @@ class SlidePageRoute<T> extends PageRouteBuilder<T> {
 
   SlidePageRoute({required this.page})
     : super(
-        pageBuilder: (context, animation, secondaryAnimation) => page,
+        pageBuilder: (context, animation, secondaryAnimation) => OnPaper(child: page),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);
           const end = Offset.zero;
@@ -48,7 +49,7 @@ class ScalePageRoute<T> extends PageRouteBuilder<T> {
 
   ScalePageRoute({required this.page})
     : super(
-        pageBuilder: (context, animation, secondaryAnimation) => page,
+        pageBuilder: (context, animation, secondaryAnimation) => OnPaper(child: page),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const curve = Curves.easeInOutCubic;
 
@@ -81,7 +82,7 @@ class SlideUpPageRoute<T> extends PageRouteBuilder<T> {
 
   SlideUpPageRoute({required this.page})
     : super(
-        pageBuilder: (context, animation, secondaryAnimation) => page,
+        pageBuilder: (context, animation, secondaryAnimation) => OnPaper(child: page),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(0.0, 1.0);
           const end = Offset.zero;

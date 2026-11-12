@@ -3,15 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// Every colour, type size, space and corner radius the app uses.
 ///
-/// The look is a filled-in paper logbook: cream paper, thin rules between rows,
+/// The look is a filled-in paper logbook: handmade paper, thin rules between rows,
 /// statuses as small office stamps, and IBM Plex Mono wherever a value reads like
 /// something written into a form (dates, matric numbers, day counts).
 class Palette {
   Palette._();
 
-  // Paper and ink.
-  static const paper = Color(0xFFFCF2E8);
-  static const sheet = Color(0xFFFFF9F1); // inputs, sheets, the raised strip of a row
+  // Paper and ink. Pages sit on the handmade paper texture ([OnPaper]); [paper]
+  // is its average colour, for surfaces that can't show it (dialogs, pickers).
+  static const paper = Color(0xFFF7EFDB);
+  static const sheet = Color(0xFFFBF7EF); // inputs, the raised strip of a row
   static const ink = Color(0xFF1E2530);
   static const inkSoft = Color(0xFF5A6070);
   static const inkFaint = Color(0xFF8E909A);
@@ -26,6 +27,30 @@ class Palette {
   static const olive = Color(0xFF5B6A2C); // approved, signed, logging
   static const ochre = Color(0xFFA06A12); // pending, waiting
   static const brick = Color(0xFFA03F2A); // returned, behind, errors
+}
+
+/// The handmade paper every page is drawn on, tiled at its own size
+/// (about 512 points wide).
+const paperTexture = BoxDecoration(
+  color: Palette.paper,
+  image: DecorationImage(
+    image: AssetImage('assets/images/handmade-paper.jpg'),
+    repeat: ImageRepeat.repeat,
+    fit: BoxFit.none,
+    scale: 3,
+    alignment: Alignment.topLeft,
+  ),
+);
+
+/// Puts a page on the paper texture. Every route wraps its page in this, so a
+/// page sliding in covers the one under it instead of showing it through.
+class OnPaper extends StatelessWidget {
+  const OnPaper({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(decoration: paperTexture, child: child);
 }
 
 /// Five type sizes (Txt, not Type, to keep clear of dart:core's Type). Montserrat for words, IBM Plex Mono for form values.

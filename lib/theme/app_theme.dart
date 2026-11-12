@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:siwes360/theme/tokens.dart';
 
-/// The app's only theme. Flat paper: no elevation, no shadows, hairline rules.
+/// The app's only theme. Handmade paper: no elevation, no shadows, hairline rules.
 ThemeData buildAppTheme() {
   final text = GoogleFonts.montserratTextTheme().apply(bodyColor: Palette.ink, displayColor: Palette.ink);
   const controlShape = RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(Radii.control)));
@@ -14,7 +15,8 @@ ThemeData buildAppTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
-    scaffoldBackgroundColor: Palette.paper,
+    // Pages are drawn on the paper texture by their route (see [OnPaper]).
+    scaffoldBackgroundColor: Colors.transparent,
     canvasColor: Palette.paper,
     textTheme: text,
     colorScheme: const ColorScheme.light(
@@ -35,7 +37,10 @@ ThemeData buildAppTheme() {
     dividerTheme: const DividerThemeData(color: Palette.rule, thickness: 1, space: 1),
     iconTheme: const IconThemeData(color: Palette.inkSoft, size: 22),
     appBarTheme: AppBarTheme(
-      backgroundColor: Palette.paper,
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      // A see-through bar would otherwise get white status bar icons.
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
       foregroundColor: Palette.ink,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -138,9 +143,27 @@ ThemeData buildAppTheme() {
     ),
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.iOS: _PaperCupertinoTransitions(),
+        TargetPlatform.android: _PaperFadeForwardsTransitions(),
       },
     ),
   );
+}
+
+class _PaperCupertinoTransitions extends CupertinoPageTransitionsBuilder {
+  const _PaperCupertinoTransitions();
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
+          Animation<double> secondaryAnimation, Widget child) =>
+      super.buildTransitions(route, context, animation, secondaryAnimation, OnPaper(child: child));
+}
+
+class _PaperFadeForwardsTransitions extends FadeForwardsPageTransitionsBuilder {
+  const _PaperFadeForwardsTransitions();
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T>? route, BuildContext? context, Animation<double> animation,
+          Animation<double> secondaryAnimation, Widget child) =>
+      super.buildTransitions(route, context, animation, secondaryAnimation, OnPaper(child: child));
 }

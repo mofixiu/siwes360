@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:siwes360/theme/app_theme.dart';
+import 'package:siwes360/theme/tokens.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/widgets/splash_screen.dart';
 
@@ -25,6 +26,7 @@ class SiwesApp extends StatelessWidget {
       title: 'SIWES360',
       theme: buildAppTheme(),
       home: const SplashScreen(),
+      builder: (context, child) => OnPaper(child: child!),
       debugShowCheckedModeBanner: false,
     );
   }

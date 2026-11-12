@@ -253,7 +253,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
           ),
         LedgerRow(
           onTap: () => Navigator.of(context).pushReplacement(
-            PageRouteBuilder(pageBuilder: (_, _, _) => const StudentLogbook(), transitionDuration: Duration.zero),
+            PageRouteBuilder(pageBuilder: (_, _, _) => const OnPaper(child: StudentLogbook()), transitionDuration: Duration.zero),
           ),
           child: _rowText('All entries', plural(_logs.length, 'entry', 'entries'), mono: true),
         ),

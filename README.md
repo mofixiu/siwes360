@@ -83,7 +83,7 @@ Screens are `StatefulWidget`s. Each one loads its data from the API in `initStat
 
 ### Design system
 
-Every colour, type size, space and radius lives in `lib/theme/tokens.dart`; screens use the components in `lib/widgets/` rather than styling widgets themselves. The look is a filled-in paper logbook: cream paper and thin rules instead of cards, review statuses as small outlined stamps (`APPROVED · N.O.`), a heavier stamp for the weekly sign-off, IBM Plex Mono for dates, matric numbers and counts, muted olive, ochre and brick for status, and navy only for things you can press.
+Every colour, type size, space and radius lives in `lib/theme/tokens.dart`; screens use the components in `lib/widgets/` rather than styling widgets themselves. The look is a filled-in paper logbook: handmade paper (a tiled texture, `assets/images/handmade-paper.jpg`) and thin rules instead of cards, review statuses as small outlined stamps (`APPROVED · N.O.`), a heavier stamp for the weekly sign-off, IBM Plex Mono for dates, matric numbers and counts, muted olive, ochre and brick for status, and navy only for things you can press.
 
 ### Internship weeks
 

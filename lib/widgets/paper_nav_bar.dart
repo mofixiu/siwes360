@@ -22,7 +22,7 @@ class PaperNavBar extends StatelessWidget {
     if (index == currentIndex) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (context, _, _) => items[index].builder(context),
+        pageBuilder: (context, _, _) => OnPaper(child: items[index].builder(context)),
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
       ),
@@ -33,7 +33,6 @@ class PaperNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Palette.paper,
         border: Border(top: BorderSide(color: Palette.rule)),
       ),
       child: SafeArea(

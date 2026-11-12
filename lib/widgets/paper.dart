@@ -476,7 +476,6 @@ class BottomAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Palette.paper,
         border: Border(top: BorderSide(color: Palette.rule)),
       ),
       padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.page, Space.md),
@@ -612,17 +611,21 @@ Future<T?> showPaperSheet<T>(BuildContext context, {required WidgetBuilder build
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    backgroundColor: Colors.transparent,
     // The keyboard inset is applied here, around the whole sheet, so the
     // sheet's content can scroll instead of being squeezed below zero height.
-    builder: (context) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: Space.sm),
-          Container(width: 36, height: 3, color: Palette.ruleStrong),
-          Flexible(child: builder(context)),
-        ],
+    builder: (context) => DecoratedBox(
+      decoration: paperTexture.copyWith(borderRadius: const BorderRadius.vertical(top: Radius.circular(Radii.control))),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: Space.sm),
+            Container(width: 36, height: 3, color: Palette.ruleStrong),
+            Flexible(child: builder(context)),
+          ],
+        ),
       ),
     ),
   );
