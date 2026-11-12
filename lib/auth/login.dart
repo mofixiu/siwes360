@@ -68,87 +68,132 @@ class _LoginState extends State<Login> {
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: Space.page),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 56),
-                  const Align(alignment: Alignment.centerLeft, child: SiwesLogo(markSize: 44, stacked: false)),
-                  const SizedBox(height: 48),
-                  Text('Sign in', style: Txt.displayStyle),
-                  const SizedBox(height: Space.xs),
-                  Text('Your daily SIWES logbook, signed by your supervisor.', style: Txt.smallStyle),
-                  const SizedBox(height: Space.xl),
-                  Text('EMAIL', style: Txt.labelStyle),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _email,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    textInputAction: TextInputAction.next,
-                    style: Txt.bodyStyle,
-                    decoration: const InputDecoration(hintText: 'you@example.com'),
-                    validator: (v) {
-                      final value = v?.trim() ?? '';
-                      if (value.isEmpty) return 'Enter your email';
-                      if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) return 'Enter a valid email';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: Space.lg),
-                  Row(
-                    children: [
-                      Expanded(child: Text('PASSWORD', style: Txt.labelStyle)),
-                      InlineLink(
-                        'Forgot password?',
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ForgotPassword())),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _password,
-                    obscureText: !_showPassword,
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _signIn(),
-                    style: Txt.bodyStyle,
-                    decoration: InputDecoration(
-                      suffixIcon: IconButton(
-                        tooltip: _showPassword ? 'Hide password' : 'Show password',
-                        icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),
-                        onPressed: () => setState(() => _showPassword = !_showPassword),
-                      ),
+          child: LayoutBuilder(
+            builder: (context, viewport) => SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: Space.page),
+              child: ConstrainedBox(
+                // At least a screen tall, so the notes sit at the foot of the page.
+                constraints: BoxConstraints(minHeight: viewport.maxHeight),
+                child: IntrinsicHeight(
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: Space.xl),
+                        const _CoverLabel(),
+                        const SizedBox(height: Space.xxl),
+                        Text('Sign in', style: Txt.titleStyle),
+                        const SizedBox(height: Space.lg),
+                        Text('EMAIL', style: Txt.labelStyle),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _email,
+                          keyboardType: TextInputType.emailAddress,
+                          autocorrect: false,
+                          textInputAction: TextInputAction.next,
+                          style: Txt.bodyStyle,
+                          decoration: const InputDecoration(hintText: 'you@example.com'),
+                          validator: (v) {
+                            final value = v?.trim() ?? '';
+                            if (value.isEmpty) return 'Enter your email';
+                            if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) return 'Enter a valid email';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: Space.lg),
+                        Row(
+                          children: [
+                            Expanded(child: Text('PASSWORD', style: Txt.labelStyle)),
+                            InlineLink(
+                              'Forgot password?',
+                              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ForgotPassword())),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _password,
+                          obscureText: !_showPassword,
+                          textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) => _signIn(),
+                          style: Txt.bodyStyle,
+                          decoration: InputDecoration(
+                            suffixIcon: IconButton(
+                              tooltip: _showPassword ? 'Hide password' : 'Show password',
+                              icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),
+                              onPressed: () => setState(() => _showPassword = !_showPassword),
+                            ),
+                          ),
+                          validator: (v) => (v ?? '').isEmpty ? 'Enter your password' : null,
+                        ),
+                        const SizedBox(height: Space.xl),
+                        PrimaryButton(label: 'Sign in', onPressed: _signIn, busy: _busy),
+                        const Spacer(),
+                        const SizedBox(height: Space.xl),
+                        const Rule(),
+                        const SizedBox(height: Space.lg),
+                        Text(
+                          'Students get their login from their institution\'s SIWES office.',
+                          style: Txt.smallStyle,
+                        ),
+                        const SizedBox(height: Space.sm),
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text('Workplace supervisor? ', style: Txt.smallStyle),
+                            InlineLink(
+                              'Register your account',
+                              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupervisorSignup())),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: Space.lg),
+                      ],
                     ),
-                    validator: (v) => (v ?? '').isEmpty ? 'Enter your password' : null,
                   ),
-                  const SizedBox(height: Space.xl),
-                  PrimaryButton(label: 'Sign in', onPressed: _signIn, busy: _busy),
-                  const SizedBox(height: 48),
-                  const Rule(),
-                  const SizedBox(height: Space.lg),
-                  Text(
-                    'Students get their login from their institution\'s SIWES office.',
-                    style: Txt.smallStyle,
-                  ),
-                  const SizedBox(height: Space.md),
-                  Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text('Workplace supervisor? ', style: Txt.smallStyle),
-                      InlineLink(
-                        'Register your account',
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupervisorSignup())),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: Space.xxl),
-                ],
+                ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The top of the sign in page, like the label on a logbook's cover: a double
+/// ruled box with the mark, the name and what the book is.
+class _CoverLabel extends StatelessWidget {
+  const _CoverLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(border: Border.all(color: Palette.ink, width: 1.5)),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(Space.lg, Space.xl, Space.lg, Space.lg),
+        decoration: BoxDecoration(
+          color: Palette.sheet.withValues(alpha: 0.6),
+          border: Border.all(color: Palette.ink, width: 0.75),
+        ),
+        child: Column(
+          children: [
+            const SiwesMark(size: 52),
+            const SizedBox(height: Space.md),
+            Text('SIWES360', style: Txt.sans(Txt.display, weight: FontWeight.w700).copyWith(letterSpacing: 1.5)),
+            const SizedBox(height: Space.xs),
+            Text('DAILY LOGBOOK', style: Txt.mono(Txt.small, weight: FontWeight.w500, color: Palette.inkSoft).copyWith(letterSpacing: 3)),
+            const SizedBox(height: Space.lg),
+            const Rule(),
+            const SizedBox(height: Space.md),
+            Text(
+              'Students’ Industrial Work Experience Scheme',
+              textAlign: TextAlign.center,
+              style: Txt.smallStyle,
+            ),
+          ],
         ),
       ),
     );
