@@ -1,28 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:siwes360/screens/admin/admin_overview.dart';
+import 'package:siwes360/screens/itf/itf_overview.dart';
 import 'package:siwes360/screens/student/studentDashboard.dart';
 import 'package:siwes360/screens/supervisor/supervisorDashboard.dart';
-import 'package:siwes360/utils/custom_page_route.dart'; // Add this import
 
 class RoleRouter {
   static Widget getHomeScreen(String role) {
     switch (role.toLowerCase()) {
-      case 'student':
-        return const StudentDashboard();
       case 'supervisor':
         return const SupervisorDashboard();
       case 'admin':
-        // TODO: Create admin dashboard
-        return const Placeholder(); // Replace with AdminDashboard()
+        return const AdminOverview();
       case 'itf':
-        // TODO: Create ITF dashboard
-        return const Placeholder(); // Replace with ITFDashboard()
+        return const ItfOverview();
+      case 'student':
       default:
-        return const StudentDashboard(); // Default fallback
+        return const StudentDashboard();
     }
   }
 
   static void navigateToRoleBasedHome(BuildContext context, String role) {
-    // Use fade transition for smooth navigation to dashboard
-    context.pushReplacementFade(getHomeScreen(role));
+    Navigator.of(context).pushAndRemoveUntil(
+      PageRouteBuilder(
+        pageBuilder: (context, _, _) => getHomeScreen(role),
+        transitionsBuilder: (context, animation, _, child) => FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 250),
+      ),
+      (_) => false,
+    );
   }
 }

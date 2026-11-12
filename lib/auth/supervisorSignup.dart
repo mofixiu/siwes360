@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/auth/login.dart';
+import 'package:siwes360/theme/tokens.dart';
 import 'package:siwes360/utils/request.dart';
-import 'package:siwes360/widgets/customButton.dart';
+import 'package:siwes360/widgets/paper.dart';
 
+/// Registration for workplace supervisors, the only role that signs up in the
+/// app. Students and school admins get their login from their institution.
 class SupervisorSignup extends StatefulWidget {
   const SupervisorSignup({super.key});
 
@@ -12,14 +15,13 @@ class SupervisorSignup extends StatefulWidget {
 
 class _SupervisorSignupState extends State<SupervisorSignup> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _organizationController = TextEditingController();
-  final TextEditingController _positionController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController =
-      TextEditingController();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _organizationController = TextEditingController();
+  final _positionController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
@@ -48,9 +50,8 @@ class _SupervisorSignupState extends State<SupervisorSignup> {
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() {
-      _isLoading = true;
-    });
+    FocusScope.of(context).unfocus();
+    setState(() => _isLoading = true);
 
     try {
       final result = await RequestService.register({
@@ -62,48 +63,31 @@ class _SupervisorSignupState extends State<SupervisorSignup> {
         'organization': _organizationController.text.trim(),
         'position': _positionController.text.trim(),
       });
-
       if (!mounted) return;
 
       if (result != null && result['status'] == 'success') {
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account created successfully! Please login.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-
-        // Navigate to login page
+        showNote(context, 'Account created. Sign in to continue.');
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const Login()),
-          (route) => false,
+          MaterialPageRoute(builder: (_) => const Login()),
+          (_) => false,
         );
       } else {
-        // Show error message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result?['message'] ?? 'Registration failed'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        showNote(context, result?['message'] ?? 'Could not register your account', error: true);
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('An error occurred: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      showNote(context, 'Could not register your account. Check your connection and try again.', error: true);
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _toSignIn() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const Login()));
     }
   }
 
@@ -113,254 +97,117 @@ class _SupervisorSignupState extends State<SupervisorSignup> {
       behavior: HitTestBehavior.opaque,
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
+        // No title: the heading below names the page.
+        appBar: AppBar(
+          leading: IconButton(tooltip: 'Back', icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        ),
         body: SafeArea(
+          top: false,
           child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 20),
+            padding: const EdgeInsets.symmetric(horizontal: Space.page),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: Space.xl),
+                  Text('Register as a workplace supervisor', style: Txt.displayStyle),
+                  const SizedBox(height: Space.sm),
+                  Text(
+                    'Students choose you as their supervisor when they set up their logbook.',
+                    style: Txt.smallStyle,
+                  ),
 
-                    // Back button
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[300]!, width: 1),
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-                        onPressed: () => Navigator.pop(context),
-                        color: Colors.black,
-                      ),
-                    ),
+                  _heading('Your details'),
+                  const Rule(),
+                  const SizedBox(height: Space.lg),
+                  _field(
+                    label: 'Full name',
+                    controller: _nameController,
+                    hint: 'First and last name',
+                    validator: (v) => (v == null || v.isEmpty) ? 'Enter your full name' : null,
+                  ),
+                  _field(
+                    label: 'Work email',
+                    controller: _emailController,
+                    hint: 'you@company.com',
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Enter your email';
+                      if (!v.contains('@')) return 'Enter a valid email';
+                      return null;
+                    },
+                  ),
+                  _field(
+                    label: 'Phone number',
+                    controller: _phoneController,
+                    hint: '0800 000 0000',
+                    keyboardType: TextInputType.phone,
+                    mono: true,
+                    validator: (v) => (v == null || v.isEmpty) ? 'Enter your phone number' : null,
+                  ),
 
-                    const SizedBox(height: 20),
+                  _heading('Workplace'),
+                  const Rule(),
+                  const SizedBox(height: Space.lg),
+                  _field(
+                    label: 'Organisation',
+                    controller: _organizationController,
+                    hint: 'Company or organisation name',
+                    validator: (v) => (v == null || v.isEmpty) ? 'Enter your organisation' : null,
+                  ),
+                  _field(
+                    label: 'Position',
+                    controller: _positionController,
+                    hint: 'e.g. Site engineer',
+                    validator: (v) => (v == null || v.isEmpty) ? 'Enter your position' : null,
+                  ),
 
-                    const Text(
-                      'Industry Supervisor\nRegistration',
-                      style: TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1E232C),
-                        height: 1.3,
-                      ),
-                    ),
+                  _heading('Password'),
+                  const Rule(),
+                  const SizedBox(height: Space.lg),
+                  _field(
+                    label: 'Password',
+                    controller: _passwordController,
+                    hint: 'At least 8 characters',
+                    isPassword: true,
+                    isPasswordVisible: _isPasswordVisible,
+                    onTogglePassword: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Enter a password';
+                      if (v.length < 8) return 'Use at least 8 characters';
+                      return null;
+                    },
+                  ),
+                  _field(
+                    label: 'Password again',
+                    controller: _confirmPasswordController,
+                    isPassword: true,
+                    isPasswordVisible: _isConfirmPasswordVisible,
+                    onTogglePassword: () => setState(() => _isConfirmPasswordVisible = !_isConfirmPasswordVisible),
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _handleRegister(),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Enter the password again';
+                      if (v != _passwordController.text) return 'The passwords do not match';
+                      return null;
+                    },
+                  ),
 
-                    const SizedBox(height: 8),
-
-                    Text(
-                      'Register to supervise student interns at your organization',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Full Name
-                    _buildTextField(
-                      controller: _nameController,
-                      label: 'FULL NAME',
-                      hint: 'Enter your full name',
-                      icon: Icons.person_outline,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your full name';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Email
-                    _buildTextField(
-                      controller: _emailController,
-                      label: 'WORK EMAIL',
-                      hint: 'you@company.com',
-                      icon: Icons.email_outlined,
-                      keyboardType: TextInputType.emailAddress,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        }
-                        if (!value.contains('@')) {
-                          return 'Please enter a valid email';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Phone
-                    _buildTextField(
-                      controller: _phoneController,
-                      label: 'PHONE NUMBER',
-                      hint: '+234 XXX XXX XXXX',
-                      icon: Icons.phone_outlined,
-                      keyboardType: TextInputType.phone,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your phone number';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Organization
-                    _buildTextField(
-                      controller: _organizationController,
-                      label: 'ORGANIZATION',
-                      hint: 'Your company/organization name',
-                      icon: Icons.business_outlined,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your organization';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Position
-                    _buildTextField(
-                      controller: _positionController,
-                      label: 'JOB POSITION',
-                      hint: 'Your position/title',
-                      icon: Icons.work_outline,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your position';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Password
-                    _buildTextField(
-                      controller: _passwordController,
-                      label: 'PASSWORD',
-                      hint: 'Create a strong password',
-                      icon: Icons.lock_outline,
-                      isPassword: true,
-                      isPasswordVisible: _isPasswordVisible,
-                      onTogglePassword: () {
-                        setState(() {
-                          _isPasswordVisible = !_isPasswordVisible;
-                        });
-                      },
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter a password';
-                        }
-                        if (value.length < 8) {
-                          return 'Password must be at least 8 characters';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Confirm Password
-                    _buildTextField(
-                      controller: _confirmPasswordController,
-                      label: 'CONFIRM PASSWORD',
-                      hint: 'Re-enter your password',
-                      icon: Icons.lock_outline,
-                      isPassword: true,
-                      isPasswordVisible: _isConfirmPasswordVisible,
-                      onTogglePassword: () {
-                        setState(() {
-                          _isConfirmPasswordVisible =
-                              !_isConfirmPasswordVisible;
-                        });
-                      },
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please confirm your password';
-                        }
-                        if (value != _passwordController.text) {
-                          return 'Passwords do not match';
-                        }
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Register Button
-                    CustomButton(
-                      ontap: _isLoading ? () {} : _handleRegister,
-                      data: _isLoading
-                          ? "Creating Account..."
-                          : "Create Account",
-                      textcolor: Colors.white,
-                      backgroundcolor: _isLoading
-                          ? Colors.grey
-                          : const Color(0xFF0A3D62),
-                      width: MediaQuery.of(context).size.width,
-                      height: 50,
-                    ),
-
-                    if (_isLoading)
-                      const Center(
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 10),
-                          child: CircularProgressIndicator(
-                            color: Color(0xFF0A3D62),
-                          ),
-                        ),
-                      ),
-
-                    const SizedBox(height: 20),
-
-                    // Login Link
-                    Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Already have an account? ',
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: Color(0xFF1E232C),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const Login(),
-                                ),
-                              );
-                            },
-                            child: const Text(
-                              'Login',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Color(0xFF0A3D62),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-                  ],
-                ),
+                  const SizedBox(height: Space.sm),
+                  PrimaryButton(label: 'Register', onPressed: _handleRegister, busy: _isLoading),
+                  const SizedBox(height: Space.xl),
+                  const Rule(),
+                  const SizedBox(height: Space.lg),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('Already registered? ', style: Txt.smallStyle),
+                      InlineLink('Sign in', onTap: _toSignIn),
+                    ],
+                  ),
+                  const SizedBox(height: Space.xxl),
+                ],
               ),
             ),
           ),
@@ -369,75 +216,50 @@ class _SupervisorSignupState extends State<SupervisorSignup> {
     );
   }
 
-  Widget _buildTextField({
-    required TextEditingController controller,
+  Widget _heading(String text) => SectionLabel(text, padding: const EdgeInsets.only(top: Space.xl, bottom: Space.sm));
+
+  Widget _field({
     required String label,
-    required String hint,
-    required IconData icon,
+    required TextEditingController controller,
+    String? hint,
     TextInputType? keyboardType,
+    bool mono = false,
     bool isPassword = false,
-    bool? isPasswordVisible,
+    bool isPasswordVisible = false,
     VoidCallback? onTogglePassword,
+    TextInputAction textInputAction = TextInputAction.next,
+    ValueChanged<String>? onSubmitted,
     String? Function(String?)? validator,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
-            letterSpacing: 0.5,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey[300]!, width: 1),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.1),
-                spreadRadius: 1,
-                blurRadius: 3,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: TextFormField(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label.toUpperCase(), style: Txt.labelStyle),
+          const SizedBox(height: 6),
+          TextFormField(
             controller: controller,
             keyboardType: keyboardType,
-            obscureText: isPassword && !(isPasswordVisible ?? false),
-            validator: validator,
+            obscureText: isPassword && !isPasswordVisible,
+            autocorrect: !isPassword && keyboardType != TextInputType.emailAddress,
+            textInputAction: textInputAction,
+            onFieldSubmitted: onSubmitted,
+            style: mono ? Txt.mono(Txt.body) : Txt.bodyStyle,
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
-              prefixIcon: Icon(icon, color: Colors.grey[600], size: 20),
               suffixIcon: isPassword
                   ? IconButton(
-                      icon: Icon(
-                        (isPasswordVisible ?? false)
-                            ? Icons.visibility
-                            : Icons.visibility_off,
-                        color: Colors.grey[600],
-                        size: 20,
-                      ),
+                      tooltip: isPasswordVisible ? 'Hide password' : 'Show password',
+                      icon: Icon(isPasswordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),
                       onPressed: onTogglePassword,
                     )
                   : null,
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
             ),
-            style: const TextStyle(fontSize: 15, color: Colors.black87),
+            validator: validator,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

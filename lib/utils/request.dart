@@ -6,8 +6,12 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http_parser/http_parser.dart';
 
-// Platform-specific host configuration
+// Platform-specific host configuration. Override with
+// --dart-define=API_HOST=http://192.168.1.20:3001 for a phone on the same network.
+const _hostOverride = String.fromEnvironment('API_HOST');
+
 String get host {
+  if (_hostOverride.isNotEmpty) return _hostOverride;
   if (kIsWeb) {
     return "http://localhost:3001";
   } else if (Platform.isAndroid) {
@@ -392,6 +396,38 @@ class RequestService {
 
     // Then update supervisor table
     return patch('/supervisors/$supervisorId', supervisorUpdateData);
+  }
+
+  // The supervisor's review queue: weeks to review and weeks to sign off.
+  static Future<Map<String, dynamic>?> getSupervisorQueue(int supervisorId) async {
+    return get('/supervisors/$supervisorId/queue');
+  }
+
+  // Weekly sign-off
+  static Future<Map<String, dynamic>?> getStudentSignoffs(int studentId) async {
+    return get('/signoffs/student/$studentId');
+  }
+
+  static Future<Map<String, dynamic>?> signOffWeek(int studentId, int week, String comment) async {
+    return post('/signoffs', {'student_id': studentId, 'week_number': week, 'comment': comment});
+  }
+
+  // School admin (SIWES coordinator): only their own institution's students.
+  static Future<Map<String, dynamic>?> getAdminOverview() async => get('/admin/overview');
+
+  static Future<Map<String, dynamic>?> getAdminStudents({String filter = 'all'}) async =>
+      get('/admin/students?filter=$filter');
+
+  static Future<Map<String, dynamic>?> getAdminSupervisors() async => get('/admin/supervisors');
+
+  // ITF: every institution, read-only.
+  static Future<Map<String, dynamic>?> getItfOverview() async => get('/itf/overview');
+
+  static Future<Map<String, dynamic>?> getItfSchoolStudents(int schoolId, {String filter = 'all'}) async =>
+      get('/itf/schools/$schoolId/students?filter=$filter');
+
+  static Future<Map<String, dynamic>?> changePassword(String currentPassword, String newPassword) async {
+    return post('/auth/change-password', {'current_password': currentPassword, 'new_password': newPassword});
   }
 
   // Password Reset Methods

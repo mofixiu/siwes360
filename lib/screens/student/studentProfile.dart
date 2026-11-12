@@ -1,13 +1,15 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:siwes360/screens/shared/settings.dart';
 import 'package:siwes360/screens/student/editStudentProfile.dart';
-import 'package:siwes360/screens/student/studentSettings.dart';
-import 'package:siwes360/utils/custom_page_route.dart';
+import 'package:siwes360/screens/student/student_nav.dart';
+import 'package:siwes360/theme/tokens.dart';
+import 'package:siwes360/utils/internship_calendar.dart';
 import 'package:siwes360/utils/request.dart';
-import 'package:siwes360/widgets/studentbottomNavBar.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:siwes360/utils/session.dart';
+import 'package:siwes360/widgets/paper.dart';
 
+/// The student's record: official details from the institution (locked) and
+/// the placement details they entered (editable from Edit profile).
 class StudentProfile extends StatefulWidget {
   const StudentProfile({super.key});
 
@@ -16,509 +18,141 @@ class StudentProfile extends StatefulWidget {
 }
 
 class _StudentProfileState extends State<StudentProfile> {
-  bool _isLoading = true;
-  Map<String, dynamic>? _profileData;
-  String _errorMessage = '';
-  String? _profileImagePath;
+  bool _loading = true;
+  String? _error;
+  int? _id;
+  Map<String, dynamic> _s = {};
+  String? _photo;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _load();
   }
 
-  Future<void> _loadProfileImage() async {
-    try {
-      final userData = await RequestService.loadUserData();
-      if (userData != null && userData['role_data'] != null) {
-        final studentId = userData['role_data']['user_id'];
-        final box = await Hive.openBox('studentProfile');
-        final imagePath = box.get('profile_image_$studentId');
-
-        if (imagePath != null && await File(imagePath).exists()) {
-          if (mounted) {
-            setState(() {
-              _profileImagePath = imagePath;
-            });
-          }
-        }
-      }
-    } catch (e) {
-      print('Error loading profile image: $e');
+  Future<void> _load() async {
+    final session = await Session.load();
+    if (session == null) {
+      if (mounted) Session.signOut(context);
+      return;
     }
-  }
-
-  Future<void> _loadProfile() async {
+    final id = (session.roleData['user_id'] as num?)?.toInt() ?? session.id;
+    final result = await RequestService.getStudentById(id);
+    final photo = await Session.photoPath('student', id);
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      // Load user data from storage
-      final userData = await RequestService.loadUserData();
-
-      if (userData == null || userData['role_data'] == null) {
-        setState(() {
-          _errorMessage = 'User data not found. Please login again.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final studentId = userData['role_data']['user_id'];
-
-      // Fetch full profile from API
-      final result = await RequestService.getStudentProfile(studentId);
-
-      if (result != null && result['status'] == 'success') {
-        setState(() {
-          _profileData = result['data'];
-          _isLoading = false;
-        });
-
-        // Load profile image after profile data is loaded
-        await _loadProfileImage();
+      _loading = false;
+      _id = id;
+      _photo = photo;
+      if (result?['status'] == 'success') {
+        _error = null;
+        _s = Map<String, dynamic>.from(result!['data']);
       } else {
-        setState(() {
-          _errorMessage = result?['message'] ?? 'Failed to load profile';
-          _isLoading = false;
-        });
+        _error = result?['message'] ?? 'Check your connection and try again.';
       }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error loading profile: ${e.toString()}';
-        _isLoading = false;
-      });
-    }
+    });
   }
 
-  String _formatDate(String? dateStr) {
-    if (dateStr == null) return 'N/A';
-    try {
-      final date = DateTime.parse(dateStr);
-      return DateFormat('MMM yyyy').format(date);
-    } catch (e) {
-      return 'N/A';
-    }
+  Future<void> _edit() async {
+    if (_id == null) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditStudentProfile(studentId: _id!)));
+    _load();
   }
 
-  String _getInternshipPeriod() {
-    if (_profileData == null) return 'N/A';
-    final start = _formatDate(_profileData!['internship_start_date']);
-    final end = _formatDate(_profileData!['internship_end_date']);
-    return '$start - $end';
-  }
+  String _v(String key) => '${_s[key] ?? ''}';
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(color: Color(0xFF0A3D62)),
-              const SizedBox(height: 16),
-              Text(
-                'Loading profile...',
-                style: TextStyle(color: Colors.grey[600]),
-              ),
-            ],
-          ),
-        ),
-        bottomNavigationBar: BottomNavBar(currentIndex: 2),
-      );
-    }
-
-    if (_errorMessage.isNotEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _loadProfile,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0A3D62),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: const Text(
-                    'Retry',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        bottomNavigationBar: BottomNavBar(currentIndex: 2),
-      );
-    }
-
+    final calendar = InternshipCalendar.from(_s['internship_start_date'], _s['internship_end_date']);
     return Scaffold(
+      bottomNavigationBar: const StudentNavBar(currentIndex: 2),
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _loadProfile,
-          color: const Color(0xFF0A3D62),
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Profile',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.settings_outlined,
-                          color: Color(0xFF0A3D62),
-                        ),
-                        onPressed: () {
-                          // Navigator.push(
-                          //   context,
-                          //   MaterialPageRoute(
-                          //     builder: (context) => const StudentSettings(),
-                          //   ),
-                          // );
-                          context.pushFade(const StudentSettings());
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Profile Card
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      // Profile Picture
-                      Container(
-                        width: 120,
-                        height: 120,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.orange[100],
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
+        bottom: false,
+        child: _loading
+            ? const LoadingView()
+            : _error != null
+                ? ErrorView(message: _error!, onRetry: _load)
+                : RefreshIndicator(
+                    color: Palette.ink,
+                    onRefresh: _load,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: Space.xxl),
+                      children: [
+                        PageHeader(
+                          title: 'Profile',
+                          actions: [
+                            IconButton(
+                              tooltip: 'Settings',
+                              icon: const Icon(Icons.settings_outlined, color: Palette.ink),
+                              onPressed: () async {
+                                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+                                _load();
+                              },
                             ),
                           ],
                         ),
-                        child: ClipOval(
-                          child: _profileImagePath != null
-                              ? Image.file(
-                                  File(_profileImagePath!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Icon(
-                                      Icons.person,
-                                      size: 60,
-                                      color: Colors.grey[400],
-                                    );
-                                  },
-                                )
-                              : Icon(
-                                  Icons.person,
-                                  size: 60,
-                                  color: Colors.grey[400],
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(Space.page, Space.xl, Space.page, 0),
+                          child: Row(
+                            children: [
+                              Monogram(name: _v('full_name'), size: 64, photoPath: _photo),
+                              const SizedBox(width: Space.lg),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(_v('full_name'), style: Txt.titleStyle),
+                                    Text(_v('matric_no'), style: Txt.mono(Txt.small, color: Palette.inkSoft)),
+                                    const SizedBox(height: Space.xs),
+                                    InlineLink('Edit profile', onTap: _edit),
+                                  ],
                                 ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Name
-                      Text(
-                        _profileData?['full_name'] ?? 'N/A',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-
-                      // Student ID
-                      Text(
-                        _profileData?['matric_no'] ?? 'N/A',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Edit Profile Button
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            final studentId = _profileData?['user_id'];
-
-                            if (studentId == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Unable to load profile data'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              return;
-                            }
-
-                            // final result = await Navigator.push(
-                            //   context,
-                            //   MaterialPageRoute(
-                            //     builder: (context) =>
-                            //         EditStudentProfile(studentId: studentId),
-                            //   ),
-                            // );
-                            final result = await context.pushFade(
-                              EditStudentProfile(studentId: studentId),
-                            );
-
-                            // Reload profile if changes were saved
-                            if (result == true && mounted) {
-                              _loadProfile();
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0A3D62),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text(
-                            'Edit Profile',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Personal Information Section
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Personal Information',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                        const SectionLabel('Official record'),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: Space.page),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Official records cannot be edited.', style: Txt.smallStyle),
+                              const SizedBox(height: Space.xs),
+                              LockedField(label: 'Institution', value: _v('school_name')),
+                              LockedField(label: 'Department', value: _v('department')),
+                              LockedField(label: 'Level', value: _s['level'] == null ? '' : '${_s['level']} level'),
+                              LockedField(label: 'Matric number', value: _v('matric_no'), mono: true),
+                              LockedField(label: 'Email', value: _v('email'), mono: true),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildInfoRow(
-                        Icons.email_outlined,
-                        'Email',
-                        _profileData?['email'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.phone_outlined,
-                        'Phone Number',
-                        _profileData?['phone'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.school_outlined,
-                        'Institution',
-                        _profileData?['school_name'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.book_outlined,
-                        'Department',
-                        _profileData?['department'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.grade_outlined,
-                        'Level',
-                        _profileData?['level']?.toString() ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Internship Details Section
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Internship Details',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                        const SectionLabel('Placement'),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: Space.page),
+                          child: Column(
+                            children: [
+                              const Rule(),
+                              DetailLine(label: 'Phone', value: _v('phone'), mono: true),
+                              DetailLine(label: 'Company', value: _v('workplace_name')),
+                              DetailLine(label: 'Address', value: _v('workplace_address')),
+                              DetailLine(label: 'Location', value: _v('workplace_location')),
+                              DetailLine(label: 'Supervisor', value: _v('supervisor_name')),
+                              DetailLine(
+                                label: 'Internship',
+                                value: calendar == null
+                                    ? ''
+                                    : '${Dates.full(calendar.start)} – ${Dates.full(calendar.end)}',
+                                mono: true,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildInfoRow(
-                        Icons.business_outlined,
-                        'Company',
-                        _profileData?['workplace_name'] ?? 'Not set',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.location_on_outlined,
-                        'Location',
-                        _profileData?['workplace_location'] ?? 'Not set',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.person_outline,
-                        'Industry Supervisor',
-                        _profileData?['supervisor_name'] ?? 'Not assigned',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.calendar_today_outlined,
-                        'Internship Period',
-                        _getInternshipPeriod(),
-                        Colors.grey[200]!,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-
-                const SizedBox(height: 20),
-                const SizedBox(height: 100),
-              ],
-            ),
-          ),
-        ),
       ),
-      bottomNavigationBar: BottomNavBar(currentIndex: 2),
-    );
-  }
-
-  Widget _buildInfoRow(
-    IconData icon,
-    String label,
-    String value,
-    Color backgroundColor, {
-    Color? statusColor,
-  }) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 20, color: Colors.black54),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: statusColor ?? Colors.black,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

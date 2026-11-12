@@ -1,11 +1,22 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:siwes360/themes/theme.dart';
-import 'package:siwes360/utils/request.dart';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:siwes360/theme/tokens.dart';
+import 'package:siwes360/utils/internship_calendar.dart';
+import 'package:siwes360/utils/request.dart';
+import 'package:siwes360/utils/session.dart';
+import 'package:siwes360/widgets/logbook_widgets.dart';
+import 'package:siwes360/widgets/paper.dart';
+
+/// Write a day's entry, or edit one that is pending or returned. The date is the
+/// title ("Tue 17 Dec · Week 3"), the writing goes on ruled lines, and Submit
+/// stays at the bottom. Pops `true` when saved.
 class AddNewLogEntry extends StatefulWidget {
-  const AddNewLogEntry({super.key});
+  const AddNewLogEntry({super.key, this.existing, this.initialDate});
+
+  final Map<String, dynamic>? existing;
+  final DateTime? initialDate;
 
   @override
   State<AddNewLogEntry> createState() => _AddNewLogEntryState();
@@ -13,669 +24,254 @@ class AddNewLogEntry extends StatefulWidget {
 
 class _AddNewLogEntryState extends State<AddNewLogEntry> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _dateController = TextEditingController();
-  final TextEditingController _activitiesController = TextEditingController();
-  final TextEditingController _skillsController = TextEditingController();
-  final TextEditingController _challengesController = TextEditingController();
+  late final TextEditingController _activities;
+  late final TextEditingController _skills;
+  late final TextEditingController _challenges;
+  late DateTime _date;
+  InternshipCalendar? _calendar;
+  final List<PlatformFile> _files = [];
+  bool _saving = false;
 
-  DateTime _selectedDate = DateTime.now();
-  List<PlatformFile> _attachedFiles = [];
-  bool _isLoading = false;
-  AutovalidateMode _autovalidateMode = AutovalidateMode.disabled; // ADD THIS
+  static const _maxBytes = 10 * 1024 * 1024;
+
+  bool get _editing => widget.existing != null;
 
   @override
   void initState() {
     super.initState();
-    _dateController.text = _formatDate(_selectedDate);
+    final e = widget.existing;
+    _activities = TextEditingController(text: e?['description'] ?? '');
+    _skills = TextEditingController(text: e?['skills_acquired'] ?? '');
+    _challenges = TextEditingController(text: e?['challenges_faced'] ?? '');
+    _date = parseDay(e?['log_date']) ?? widget.initialDate ?? today();
+    _loadCalendar();
   }
 
   @override
   void dispose() {
-    _dateController.dispose();
-    _activitiesController.dispose();
-    _skillsController.dispose();
-    _challengesController.dispose();
+    _activities.dispose();
+    _skills.dispose();
+    _challenges.dispose();
     super.dispose();
   }
 
-  String _formatDate(DateTime date) {
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  Future<void> _loadCalendar() async {
+    final session = await Session.load();
+    if (session == null) return;
+    final id = (session.roleData['user_id'] as num?)?.toInt() ?? session.id;
+    final result = await RequestService.getStudentById(id);
+    if (!mounted || result?['status'] != 'success') return;
+    setState(() {
+      _calendar = InternshipCalendar.from(
+        result!['data']['internship_start_date'],
+        result['data']['internship_end_date'],
+      );
+    });
   }
 
-  Future<void> _selectDate() async {
-    final DateTime? picked = await showDatePicker(
+  Future<void> _pickDate() async {
+    final now = today();
+    final first = _calendar?.start ?? DateTime(now.year - 1);
+    final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: SIWES360.lightButtonBackground,
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
-          ),
-          child: child!,
-        );
-      },
+      initialDate: _date.isBefore(first) ? first : _date,
+      firstDate: first,
+      lastDate: now,
+      helpText: 'Which day is this entry for?',
     );
-
-    if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-        _dateController.text = _formatDate(picked);
-      });
-    }
+    if (picked != null) setState(() => _date = picked);
   }
 
   Future<void> _pickFiles() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.custom,
-        allowedExtensions: [
-          'pdf',
-          'doc',
-          'docx',
-          'jpg',
-          'jpeg',
-          'png',
-          'xls',
-          'xlsx',
-        ],
-      );
-
-      if (result != null) {
-        // Check total size
-        int totalSize = result.files.fold(0, (sum, file) => sum + (file.size));
-        if (totalSize > 10 * 1024 * 1024) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Total file size exceeds 10MB limit'),
-              backgroundColor: Colors.red,
-            ),
-          );
-          return;
-        }
-
-        setState(() {
-          _attachedFiles.addAll(result.files);
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error picking files: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  void _removeFile(int index) {
-    setState(() {
-      _attachedFiles.removeAt(index);
-    });
-  }
-
-  String _getFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-
-  IconData _getFileIcon(String filename) {
-    final extension = filename.split('.').last.toLowerCase();
-    switch (extension) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'doc':
-      case 'docx':
-        return Icons.description;
-      case 'xls':
-      case 'xlsx':
-        return Icons.table_chart;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-        return Icons.image;
-      default:
-        return Icons.insert_drive_file;
-    }
-  }
-
-  Color _getFileIconColor(String filename) {
-    final extension = filename.split('.').last.toLowerCase();
-    switch (extension) {
-      case 'pdf':
-        return Colors.red;
-      case 'doc':
-      case 'docx':
-        return Colors.blue;
-      case 'xls':
-      case 'xlsx':
-        return Colors.green;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Future<void> _submitLog() async {
-    print('=== Submit Log Called ===');
-
-    if (!_formKey.currentState!.validate()) {
-      print('Form validation failed');
-
-      // Enable auto-validation after first failed attempt
-      setState(() {
-        _autovalidateMode = AutovalidateMode.onUserInteraction;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in all required fields correctly'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 2),
-        ),
-      );
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'xls', 'xlsx'],
+    );
+    if (result == null || !mounted) return;
+    final total = [..._files, ...result.files].fold<int>(0, (sum, f) => sum + f.size);
+    if (total > _maxBytes) {
+      showNote(context, 'Attachments can be 10 MB in total', error: true);
       return;
     }
+    setState(() => _files.addAll(result.files));
+  }
 
-    print('Form validated successfully');
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // Get student ID from stored user data
-      print('Loading user data...');
-      final userData = await RequestService.loadUserData();
-      print('User data loaded: ${userData != null}');
-
-      if (userData == null || userData['role_data'] == null) {
-        throw Exception('User data not found');
-      }
-
-      final studentId = userData['role_data']['user_id'];
-      print('Student ID: $studentId');
-
-      // Format date as YYYY-MM-DD in local timezone (no UTC conversion)
-      final formattedDate =
-          '${_selectedDate.year}-'
-          '${_selectedDate.month.toString().padLeft(2, '0')}-'
-          '${_selectedDate.day.toString().padLeft(2, '0')}';
-
-      print('Selected date: $_selectedDate');
-      print('Formatted date: $formattedDate');
-
-      // Prepare log data
-      final logData = {
-        'student_id': studentId,
-        'log_date': formattedDate, // Use local date format
-        'description': _activitiesController.text.trim(),
-        'skills_acquired': _skillsController.text.trim().isNotEmpty
-            ? _skillsController.text.trim()
-            : null,
-        'challenges_faced': _challengesController.text.trim().isNotEmpty
-            ? _challengesController.text.trim()
-            : null,
-      };
-
-      print('Log data prepared: $logData');
-
-      // Convert PlatformFile to File for upload
-      List<File>? fileAttachments;
-      if (_attachedFiles.isNotEmpty) {
-        print('Processing ${_attachedFiles.length} attachments...');
-        fileAttachments = _attachedFiles
-            .where((file) => file.path != null)
-            .map((file) => File(file.path!))
-            .toList();
-        print('Converted ${fileAttachments.length} files');
-      } else {
-        print('No attachments to process');
-      }
-
-      // Create log with attachments
-      print('Calling createDailyLog API...');
-      final result = await RequestService.createDailyLog(
-        logData,
-        attachments: fileAttachments,
-      );
-
-      print('API Response: $result');
-
-      if (!mounted) {
-        print('Widget not mounted, returning');
-        return;
-      }
-
-      if (result != null && result['status'] == 'success') {
-        print('Log created successfully!');
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Log entry created successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-
-        _activitiesController.clear();
-        _skillsController.clear();
-        _challengesController.clear();
-        setState(() {
-          _attachedFiles.clear();
-          _selectedDate = DateTime.now();
-          _dateController.text = _formatDate(_selectedDate);
-        });
-
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
-          Navigator.pop(context, true);
-        }
-      } else {
-        print('API returned error: ${result?['message']}');
-        throw Exception(result?['message'] ?? 'Failed to create log entry');
-      }
-    } catch (e, stackTrace) {
-      print('=== Error in _submitLog ===');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: ${e.toString()}'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    } finally {
-      print('Finally block - setting loading to false');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _saving = true);
+    final fields = {
+      'log_date': apiDay(_date),
+      'description': _activities.text.trim(),
+      'skills_acquired': _skills.text.trim(),
+      'challenges_faced': _challenges.text.trim(),
+    };
+    final result = _editing
+        ? await RequestService.updateDailyLog(widget.existing!['id'], fields)
+        : await RequestService.createDailyLog({
+            ...fields,
+            'skills_acquired': _skills.text.trim().isEmpty ? null : _skills.text.trim(),
+            'challenges_faced': _challenges.text.trim().isEmpty ? null : _challenges.text.trim(),
+          }, attachments: _files.where((f) => f.path != null).map((f) => File(f.path!)).toList());
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (result?['status'] == 'success') {
+      showNote(context, _editing ? 'Entry updated and sent for review' : 'Entry sent to your supervisor');
+      Navigator.pop(context, true);
+    } else {
+      showNote(context, result?['message'] ?? 'Could not save the entry', error: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final week = _calendar?.weekOf(_date);
+    final returned = widget.existing != null && EntryStatus.of(widget.existing!['status']) == EntryStatus.rejected;
     return GestureDetector(
-      onTap: () {
-        print('GestureDetector tapped - unfocusing');
-        FocusScope.of(context).unfocus();
-      },
-      behavior: HitTestBehavior.opaque,
+      onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
         appBar: AppBar(
-          elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.black),
-            onPressed: () {
-              print('Back button tapped');
-              Navigator.pop(context);
-            },
+            tooltip: 'Back',
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.pop(context),
           ),
-          title: const Text(
-            'New Log Entry',
-            style: TextStyle(
-              color: Colors.black,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        body: Form(
-          key: _formKey,
-          autovalidateMode: _autovalidateMode, // ADD THIS
-          child: SingleChildScrollView(
+          titleSpacing: 0,
+          title: InkWell(
+            onTap: _pickDate,
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.symmetric(vertical: Space.sm),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Date Selection
-                  _buildSectionHeader(
-                    'Log Date',
-                    Icons.calendar_today_outlined,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildDateField(),
-                  const SizedBox(height: 24),
-
-                  // Activities/Tasks Completed
-                  _buildSectionHeader(
-                    'Activities Completed',
-                    Icons.assignment_outlined,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _activitiesController,
-                    hint:
-                        'Describe the tasks and activities you worked on today...',
-                    maxLines: 6,
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Please describe your activities';
-                      }
-                      if (value.trim().length < 20) {
-                        return 'Please provide more details (minimum 20 characters)';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Skills Acquired
-                  _buildSectionHeader('Skills Acquired', Icons.star_outline),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _skillsController,
-                    hint:
-                        'What new skills or knowledge did you gain? (Optional)',
-                    maxLines: 4,
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Challenges Faced
-                  _buildSectionHeader(
-                    'Challenges Faced',
-                    Icons.warning_amber_outlined,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _challengesController,
-                    hint:
-                        'Describe any challenges or difficulties encountered (Optional)',
-                    maxLines: 4,
-                  ),
-                  const SizedBox(height: 24),
-
-                  // File Attachments
-                  _buildSectionHeader('Attachments', Icons.attach_file),
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: _pickFiles,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 40,
-                        horizontal: 50,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.grey[300]!,
-                          style: BorderStyle.solid,
-                          width: 2,
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.cloud_upload_outlined,
-                            size: 48,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Drag & drop files or',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Browse Files',
-                            style: TextStyle(
-                              color: Colors.blue,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Maximum total size: 10MB',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            'Supported: PDF, DOC, DOCX, JPG, PNG, XLS, XLSX',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Attached Files List
-                  if (_attachedFiles.isNotEmpty)
-                    ...List.generate(_attachedFiles.length, (index) {
-                      final file = _attachedFiles[index];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: _getFileIconColor(
-                                  file.name,
-                                ).withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(
-                                _getFileIcon(file.name),
-                                color: _getFileIconColor(file.name),
-                                size: 24,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    file.name,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _getFileSize(file.size),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close, color: Colors.red),
-                              onPressed: () => _removeFile(index),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-
-                  const SizedBox(height: 32),
-
-                  // Submit Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () {
-                              print('Submit button tapped!');
-                              print('Is loading: $_isLoading');
-                              _submitLog();
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0A3D62),
-                        disabledBackgroundColor: Colors.grey,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Text(
-                              'Submit Log Entry',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
+                  Text(Dates.short(_date), style: Txt.titleStyle),
+                  if (week != null) Text('  ·  Week $week', style: Txt.mono(Txt.body, color: Palette.inkSoft)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.expand_more, size: 20, color: Palette.inkSoft),
                 ],
               ),
             ),
           ),
         ),
+        // Submit sits under the form rather than in bottomNavigationBar, so it
+        // stays above the keyboard.
+        body: Column(
+          children: [
+            Expanded(
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(Space.page, Space.lg, Space.page, Space.xxl),
+                  children: [
+                    if (returned && '${widget.existing!['supervisor_comment'] ?? ''}'.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(Space.md),
+                        decoration: const BoxDecoration(
+                          color: Palette.sheet,
+                          border: Border(left: BorderSide(color: Palette.brick, width: 2)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('RETURNED WITH THIS COMMENT', style: Txt.labelStyle),
+                            const SizedBox(height: Space.xs),
+                            Text('${widget.existing!['supervisor_comment']}', style: Txt.bodyStyle),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: Space.xl),
+                    ],
+                    RuledTextArea(
+                      controller: _activities,
+                      label: 'Activities',
+                      hint: 'What did you work on today?',
+                      minLines: 6,
+                      validator: (v) {
+                        final text = v?.trim() ?? '';
+                        if (text.isEmpty) return 'Write what you did today';
+                        if (text.length < 20) return 'Add a little more detail (at least 20 characters)';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: Space.xl),
+                    RuledTextArea(
+                      controller: _skills,
+                      label: 'Skills acquired',
+                      hint: 'Anything new you learnt',
+                      minLines: 3,
+                      optional: true,
+                    ),
+                    const SizedBox(height: Space.xl),
+                    RuledTextArea(
+                      controller: _challenges,
+                      label: 'Challenges faced',
+                      hint: 'Anything that slowed you down',
+                      minLines: 3,
+                      optional: true,
+                    ),
+                    if (!_editing) ...[
+                      const SizedBox(height: Space.xl),
+                      Row(
+                        children: [
+                          Text('ATTACHMENTS', style: Txt.labelStyle),
+                          const SizedBox(width: Space.sm),
+                          Text('optional · 10 MB total', style: Txt.sans(Txt.label, color: Palette.inkFaint)),
+                        ],
+                      ),
+                      const SizedBox(height: Space.xs),
+                      const Rule(),
+                      for (var i = 0; i < _files.length; i++)
+                        LedgerRow(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
+                          trailing: IconButton(
+                            tooltip: 'Remove ${_files[i].name}',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () => setState(() => _files.removeAt(i)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _files[i].name,
+                                style: Txt.sans(Txt.small, color: Palette.ink),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(_size(_files[i].size), style: Txt.mono(Txt.label, color: Palette.inkFaint)),
+                            ],
+                          ),
+                        ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _pickFiles,
+                          icon: const Icon(Icons.attach_file, size: 18),
+                          label: const Text('Attach a file'),
+                        ),
+                      ),
+                      Text('PDF, Word, Excel, JPG or PNG', style: Txt.sans(Txt.label, color: Palette.inkFaint)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            BottomAction(
+              child: PrimaryButton(
+                label: _editing ? (returned ? 'Resubmit for review' : 'Save changes') : 'Submit for review',
+                onPressed: _submit,
+                busy: _saving,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0A3D62).withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: const Color(0xFF0A3D62), size: 20),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF0A3D62),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDateField() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: TextFormField(
-        controller: _dateController,
-        readOnly: true,
-        onTap: _selectDate,
-        decoration: InputDecoration(
-          hintText: 'Select date',
-          hintStyle: TextStyle(color: Colors.grey[400]),
-          prefixIcon: const Icon(
-            Icons.calendar_today_outlined,
-            color: Color(0xFF0A3D62),
-          ),
-          suffixIcon: Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
-        ),
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please select a date';
-          }
-          return null;
-        },
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String hint,
-    int maxLines = 1,
-    String? Function(String?)? validator,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        validator: validator,
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.all(16),
-        ),
-        style: const TextStyle(fontSize: 15),
-      ),
-    );
+  String _size(int bytes) {
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }

@@ -1,11 +1,16 @@
-// ignore_for_file: unused_element
-
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
+import 'package:siwes360/screens/student/entry_sheet.dart';
+import 'package:siwes360/screens/student/student_nav.dart';
+import 'package:siwes360/theme/tokens.dart';
+import 'package:siwes360/utils/internship_calendar.dart';
 import 'package:siwes360/utils/request.dart';
-import 'package:siwes360/widgets/studentbottomNavBar.dart';
+import 'package:siwes360/utils/session.dart';
+import 'package:siwes360/widgets/logbook_widgets.dart';
+import 'package:siwes360/widgets/paper.dart';
 
+/// The whole logbook, a week to a page: each week's entries Monday to Friday,
+/// with the supervisor's weekly sign-off beside the week.
 class StudentLogbook extends StatefulWidget {
   const StudentLogbook({super.key});
 
@@ -13,1756 +18,254 @@ class StudentLogbook extends StatefulWidget {
   State<StudentLogbook> createState() => _StudentLogbookState();
 }
 
-class _StudentLogbookState extends State<StudentLogbook> {
-  String _selectedFilter = 'All';
-  DateTime? _selectedCalendarDate;
-  bool _isLoading = true;
-  String _errorMessage = '';
+enum _Filter { all, approved, pending, returned }
 
-  // Data from API
-  List<Map<String, dynamic>> _allLogs = [];
-  Map<String, dynamic>? _progressData;
-  Map<String, dynamic>? _studentData;
+class _StudentLogbookState extends State<StudentLogbook> {
+  bool _loading = true;
+  String? _error;
+  Map<String, dynamic> _student = {};
+  String? _supervisorName;
+  List<Map<String, dynamic>> _logs = [];
+  Map<int, Map<String, dynamic>> _signoffs = {};
+  _Filter _filter = _Filter.all;
 
   @override
   void initState() {
     super.initState();
-    _loadLogbookData();
+    _load();
   }
 
-  Future<void> _loadLogbookData() async {
+  Future<void> _load() async {
     setState(() {
-      _isLoading = true;
-      _errorMessage = '';
+      _loading = _student.isEmpty;
+      _error = null;
     });
-
-    try {
-      // Load user data from local storage
-      final userData = await RequestService.loadUserData();
-
-      if (userData == null || userData['role_data'] == null) {
-        setState(() {
-          _errorMessage = 'User data not found. Please login again.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final studentId = userData['role_data']['user_id'];
-
-      // Fetch dashboard data for progress
-      final dashboardResult = await RequestService.getStudentDashboardData(
-        studentId,
-      );
-
-      // Fetch all logs
-      final logsResult = await RequestService.getAllDailyLogs(studentId);
-
-      if (dashboardResult != null && dashboardResult['status'] == 'success') {
-        setState(() {
-          _progressData = dashboardResult['data']['progress'];
-          _studentData = dashboardResult['data']['student'];
-        });
-      }
-
-      if (logsResult != null && logsResult['status'] == 'success') {
-        setState(() {
-          _allLogs = List<Map<String, dynamic>>.from(logsResult['data'] ?? []);
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _errorMessage = logsResult?['message'] ?? 'Failed to load logs';
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error loading logbook: ${e.toString()}';
-        _isLoading = false;
-      });
+    final session = await Session.load();
+    if (session == null) {
+      if (mounted) Session.signOut(context);
+      return;
     }
+    final id = (session.roleData['user_id'] as num?)?.toInt() ?? session.id;
+    final results = await Future.wait([
+      RequestService.getStudentDashboardData(id),
+      RequestService.getAllDailyLogs(id),
+      RequestService.getStudentSignoffs(id),
+    ]);
+    if (!mounted) return;
+    if (results[1]?['status'] != 'success') {
+      setState(() {
+        _loading = false;
+        _error = results[1]?['message'] ?? 'Check your connection and try again.';
+      });
+      return;
+    }
+    setState(() {
+      _loading = false;
+      if (results[0]?['status'] == 'success') {
+        _student = Map<String, dynamic>.from(results[0]!['data']['student'] ?? {});
+        _supervisorName = results[0]!['data']['supervisor']?['full_name'];
+      }
+      _logs = List<Map<String, dynamic>>.from((results[1]!['data'] as List).map((e) => Map<String, dynamic>.from(e)));
+      _signoffs = {
+        if (results[2]?['status'] == 'success')
+          for (final s in results[2]!['data'] as List) (s['week_number'] as num).toInt(): Map<String, dynamic>.from(s),
+      };
+    });
   }
 
-  // Get greeting based on current time
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) {
-      return 'Good Morning';
-    } else if (hour < 17) {
-      return 'Good Afternoon';
+  InternshipCalendar? get _calendar => InternshipCalendar.from(_student['internship_start_date'], _student['internship_end_date']);
+
+  bool _matches(Map<String, dynamic> log) => _inFilter(_filter, log);
+
+  static bool _inFilter(_Filter filter, Map<String, dynamic> log) {
+    final status = EntryStatus.of(log['status']);
+    return switch (filter) {
+      _Filter.all => true,
+      _Filter.approved => status == EntryStatus.approved,
+      _Filter.pending => status == EntryStatus.pending,
+      _Filter.returned => status == EntryStatus.rejected,
+    };
+  }
+
+  Future<void> _write({DateTime? day}) async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => AddNewLogEntry(initialDate: day)),
+    );
+    if (created == true) _load();
+  }
+
+  Future<void> _open(Map<String, dynamic> entry) async {
+    final d = parseDay(entry['log_date']);
+    final changed = await showEntrySheet(
+      context,
+      entry,
+      reviewerName: _supervisorName,
+      week: d == null ? null : _calendar?.weekOf(d),
+      canEdit: true,
+    );
+    if (changed) _load();
+  }
+
+  Future<void> _jumpToDate() async {
+    final calendar = _calendar;
+    final now = today();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: calendar?.start ?? DateTime(now.year - 1),
+      lastDate: now,
+      helpText: 'Open the entry for',
+    );
+    if (picked == null || !mounted) return;
+    final entry = _logs.where((l) => sameDay(parseDay(l['log_date']) ?? DateTime(0), picked)).firstOrNull;
+    if (entry != null) {
+      _open(entry);
     } else {
-      return 'Good Evening';
+      final write = await confirm(
+        context,
+        title: 'No entry for ${Dates.short(picked)}',
+        message: 'You did not write anything for that day.',
+        action: 'Write it now',
+      );
+      if (write) _write(day: picked);
     }
-  }
-
-  // Group logs by week
-  Map<int, List<Map<String, dynamic>>> get _groupedByWeek {
-    if (_allLogs.isEmpty) return {};
-
-    Map<int, List<Map<String, dynamic>>> grouped = {};
-
-    for (var log in _allLogs) {
-      final logDate = DateTime.parse(log['log_date']);
-      final weekNumber = _getWeekNumber(logDate);
-
-      if (grouped[weekNumber] == null) {
-        grouped[weekNumber] = [];
-      }
-      grouped[weekNumber]!.add(log);
-    }
-
-    return grouped;
-  }
-
-  int _getWeekNumber(DateTime date) {
-    final startDate = _studentData?['internship_start_date'] != null
-        ? DateTime.parse(_studentData!['internship_start_date'])
-        : DateTime.now();
-
-    final difference = date.difference(startDate).inDays;
-    return (difference / 7).floor() + 1;
-  }
-
-  List<Map<String, dynamic>> get filteredLogs {
-    if (_selectedFilter == 'All') {
-      return _allLogs;
-    }
-    return _allLogs.where((log) {
-      final status = log['status']?.toString().toLowerCase() ?? 'pending';
-      return status == _selectedFilter.toLowerCase();
-    }).toList();
-  }
-
-  String _formatDate(String? dateStr) {
-    if (dateStr == null) return 'N/A';
-    try {
-      final date = DateTime.parse(dateStr);
-      return DateFormat('MMM d').format(date);
-    } catch (e) {
-      return 'N/A';
-    }
-  }
-
-  // Color _getStatusColor(String status) {
-  //   switch (status.toLowerCase()) {
-  //     case 'approved':
-  //       return Colors.green;
-  //     case 'rejected':
-  //       return Colors.red;
-  //     case 'pending':
-  //     default:
-  //       return Colors.orange;
-  //   }
-  // }
-
-  void _showCalendarPicker() async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedCalendarDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFF0A3D62),
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (picked != null) {
-      setState(() {
-        _selectedCalendarDate = picked;
-      });
-
-      // Find logs for the selected date
-      final selectedDateStr = picked.toIso8601String().split('T')[0];
-      final logsOnDate = _allLogs.where((log) {
-        final logDateStr = log['log_date'].toString().split('T')[0];
-        return logDateStr == selectedDateStr;
-      }).toList();
-
-      if (!mounted) return;
-
-      if (logsOnDate.isEmpty) {
-        // No logs found for this date
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'No log entries found for ${DateFormat('MMM d, yyyy').format(picked)}',
-            ),
-            backgroundColor: Colors.orange,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      } else {
-        // Sort by created_at to get the latest log
-        logsOnDate.sort((a, b) {
-          final aCreated = DateTime.parse(a['created_at'] ?? a['log_date']);
-          final bCreated = DateTime.parse(b['created_at'] ?? b['log_date']);
-          return bCreated.compareTo(
-            aCreated,
-          ); // Descending order (latest first)
-        });
-
-        final latestLog = logsOnDate.first;
-
-        // Show the log details
-        _showLogDetailsForDate(latestLog, logsOnDate.length);
-      }
-    }
-  }
-
-  void _showLogDetailsForDate(Map<String, dynamic> log, int totalLogsOnDate) {
-    final status = log['status']?.toString() ?? 'pending';
-    final statusColor = _getStatusColor(status);
-    final canEdit =
-        status.toLowerCase() == 'pending' || status.toLowerCase() == 'rejected';
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) {
-          return Container(
-            decoration: const BoxDecoration(
-              color: Color.fromRGBO(252, 242, 232, 1),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Column(
-              children: [
-                // Handle
-                Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[400],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                // Content
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    DateFormat(
-                                      'MMM d, yyyy',
-                                    ).format(DateTime.parse(log['log_date'])),
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  if (totalLogsOnDate > 1) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Latest of $totalLogsOnDate entries',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _getStatusIcon(status),
-                                    size: 16,
-                                    color: statusColor,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    status.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: statusColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Description',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          log['description'] ?? 'No description',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[800],
-                            height: 1.5,
-                          ),
-                        ),
-                        if (log['skills_acquired'] != null) ...[
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Skills Acquired',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            log['skills_acquired'],
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[800],
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                        if (log['challenges_faced'] != null) ...[
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Challenges Faced',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            log['challenges_faced'],
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[800],
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                        if (log['supervisor_comment'] != null) ...[
-                          const SizedBox(height: 24),
-                          const Divider(),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Supervisor Comment',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0A3D62).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: const Color(0xFF0A3D62).withOpacity(0.2),
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(
-                                  Icons.chat_bubble_outline,
-                                  size: 16,
-                                  color: Color(0xFF0A3D62),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    log['supervisor_comment'],
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
-                        // Action buttons for pending/rejected entries
-                        if (canEdit) ...[
-                          const SizedBox(height: 32),
-                          const Divider(),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    _showDeleteConfirmationForLog(context, log);
-                                  },
-                                  icon: const Icon(Icons.delete_outline),
-                                  label: const Text('Delete'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.red,
-                                    side: const BorderSide(color: Colors.red),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    _showEditDialogForLog(context, log);
-                                  },
-                                  icon: const Icon(Icons.edit_outlined),
-                                  label: const Text('Edit'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0A3D62),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showEditDialogForLog(BuildContext context, Map<String, dynamic> log) {
-    // Create a LogEntryCard just to use its edit functionality
-    final card = LogEntryCard(log: log, onLogUpdated: _loadLogbookData);
-    card._showEditDialog(context);
-  }
-
-  void _showDeleteConfirmationForLog(
-    BuildContext context,
-    Map<String, dynamic> log,
-  ) {
-    // Create a LogEntryCard just to use its delete functionality
-    final card = LogEntryCard(log: log, onLogUpdated: _loadLogbookData);
-    card._showDeleteConfirmation(context);
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Colors.green;
-      case 'rejected':
-        return Colors.red;
-      case 'pending':
-      default:
-        return Colors.orange;
-    }
-  }
-
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Icons.check_circle;
-      case 'rejected':
-        return Icons.cancel;
-      case 'pending':
-      default:
-        return Icons.pending;
-    }
-  }
-
-  void _showFilterOptions() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                margin: const EdgeInsets.only(bottom: 20),
-              ),
-              const Text(
-                'Filter by Status',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 20),
-              _buildFilterOption('All', Icons.grid_view_rounded, Colors.purple),
-              _buildFilterOption(
-                'Approved',
-                Icons.check_circle_rounded,
-                Colors.green,
-              ),
-              _buildFilterOption(
-                'Pending',
-                Icons.schedule_rounded,
-                Colors.orange,
-              ),
-              _buildFilterOption('Rejected', Icons.cancel_rounded, Colors.red),
-              const SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildFilterOption(String label, IconData icon, Color color) {
-    final isSelected = _selectedFilter == label;
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.2) : color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(icon, color: color, size: 24),
-      ),
-      title: Text(
-        label,
-        style: TextStyle(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          color: isSelected ? color : Colors.black,
-        ),
-      ),
-      trailing: isSelected ? Icon(Icons.check_circle, color: color) : null,
-      onTap: () {
-        setState(() {
-          _selectedFilter = label;
-        });
-        Navigator.pop(context);
-      },
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(color: Color(0xFF0A3D62)),
-              const SizedBox(height: 16),
-              Text(
-                'Loading logbook...',
-                style: TextStyle(color: Colors.grey[600]),
-              ),
-            ],
-          ),
-        ),
-        bottomNavigationBar: BottomNavBar(currentIndex: 1),
-      );
-    }
-
-    if (_errorMessage.isNotEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _loadLogbookData,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0A3D62),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: const Text(
-                    'Retry',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        bottomNavigationBar: BottomNavBar(currentIndex: 1),
-      );
-    }
-
     return Scaffold(
+      bottomNavigationBar: const StudentNavBar(currentIndex: 1),
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _loadLogbookData,
-          color: const Color(0xFF0A3D62),
-          child: CustomScrollView(
-            slivers: [
-              // Header
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Logbook',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              Icons.calendar_today_outlined,
-                              color: _selectedCalendarDate != null
-                                  ? const Color(0xFF0A3D62)
-                                  : Colors.black,
-                            ),
-                            onPressed: _showCalendarPicker,
-                          ),
-                          IconButton(
-                            icon: Icon(
-                              Icons.filter_list,
-                              color: _selectedFilter != 'All'
-                                  ? const Color(0xFF0A3D62)
-                                  : Colors.black,
-                            ),
-                            onPressed: _showFilterOptions,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Greeting
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${_getGreeting()},',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _studentData?['full_name'] ?? 'Student',
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Progress Card
-              if (_progressData != null)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'Internship Progress',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                '${_progressData!['percentage'] ?? 0}%',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0A3D62),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'SIWES Program ${DateTime.now().year}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          LinearProgressIndicator(
-                            value: (_progressData!['percentage'] ?? 0) / 100,
-                            backgroundColor: Colors.grey[200],
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              Color(0xFF0A3D62),
-                            ),
-                            minHeight: 8,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Day ${_progressData!['daysCompleted'] ?? 0} of ${_progressData!['totalDays'] ?? 0}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                              Text(
-                                '${_progressData!['daysRemaining'] ?? 0} Days Left',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-
-              // Recent Entries Header with filter indicator
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Log Entries',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (_selectedFilter != 'All')
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0A3D62).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            _selectedFilter,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF0A3D62),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
-              // Log Entries List
-              if (filteredLogs.isEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                    child: Container(
-                      padding: const EdgeInsets.all(48),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Center(
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.note_add_outlined,
-                              size: 64,
-                              color: Colors.grey[400],
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _selectedFilter == 'All'
-                                  ? 'No log entries yet'
-                                  : 'No $_selectedFilter logs found',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Tap the + button to create your first log',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[500],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                // Group logs by week and display
-                ...() {
-                  // Get grouped logs based on filtered logs
-                  Map<int, List<Map<String, dynamic>>> weekGroups = {};
-
-                  for (var log in filteredLogs) {
-                    final logDate = DateTime.parse(log['log_date']);
-                    final weekNumber = _getWeekNumber(logDate);
-
-                    if (weekGroups[weekNumber] == null) {
-                      weekGroups[weekNumber] = [];
-                    }
-                    weekGroups[weekNumber]!.add(log);
-                  }
-
-                  // Sort weeks in descending order (most recent first)
-                  final sortedWeeks = weekGroups.keys.toList()
-                    ..sort((a, b) => b.compareTo(a));
-
-                  return sortedWeeks.map((weekNumber) {
-                    final logsInWeek = weekGroups[weekNumber]!;
-
-                    return SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Week Header
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 12.0,
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(
-                                        0xFF0A3D62,
-                                      ).withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'Week $weekNumber',
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF0A3D62),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '${logsInWeek.length} ${logsInWeek.length == 1 ? 'entry' : 'entries'}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            // Logs in this week
-                            ...logsInWeek.map((log) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12.0),
-                                child: LogEntryCard(
-                                  log: log,
-                                  onLogUpdated:
-                                      _loadLogbookData, // Add this line
-                                ),
-                              );
-                            }).toList(),
-                            const SizedBox(height: 12),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList();
-                }(),
-
-              // Bottom spacing
-              const SliverToBoxAdapter(child: SizedBox(height: 80)),
-            ],
-          ),
-        ),
+        bottom: false,
+        child: _loading
+            ? const LoadingView()
+            : _error != null
+                ? ErrorView(message: _error!, onRetry: _load)
+                : RefreshIndicator(color: Palette.ink, onRefresh: _load, child: _body()),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const AddNewLogEntry()),
-          );
-
-          // Reload logbook if a new log was created
-          if (result == true && mounted) {
-            _loadLogbookData();
-          }
-        },
-        backgroundColor: const Color(0xFF0A3D62),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
-      bottomNavigationBar: BottomNavBar(currentIndex: 1),
     );
   }
-}
 
-// Log Entry Card Widget
-class LogEntryCard extends StatelessWidget {
-  final Map<String, dynamic> log;
-  final VoidCallback onLogUpdated; // Add this callback
+  Widget _body() {
+    final calendar = _calendar;
+    final now = today();
+    final counts = {for (final f in _Filter.values) f: _logs.where((l) => _inFilter(f, l)).length};
 
-  const LogEntryCard({
-    super.key,
-    required this.log,
-    required this.onLogUpdated, // Add this parameter
-  });
-
-  String _formatDate(String? dateStr) {
-    if (dateStr == null) return 'N/A';
-    try {
-      final date = DateTime.parse(dateStr);
-      return DateFormat('MMM d, yyyy').format(date);
-    } catch (e) {
-      return 'N/A';
+    // Group by internship week, newest week first; entries Monday to Friday.
+    final weeks = <int, List<Map<String, dynamic>>>{};
+    for (final log in _logs.where(_matches)) {
+      final d = parseDay(log['log_date']);
+      if (d == null) continue;
+      weeks.putIfAbsent(calendar?.weekOf(d) ?? 0, () => []).add(log);
     }
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Colors.green;
-      case 'rejected':
-        return Colors.red;
-      case 'pending':
-      default:
-        return Colors.orange;
+    final order = weeks.keys.toList()..sort((a, b) => b.compareTo(a));
+    for (final w in order) {
+      weeks[w]!.sort((a, b) => '${a['log_date']}'.compareTo('${b['log_date']}'));
     }
-  }
 
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Icons.check_circle;
-      case 'rejected':
-        return Icons.cancel;
-      case 'pending':
-      default:
-        return Icons.pending;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final status = log['status']?.toString() ?? 'pending';
-    final statusColor = _getStatusColor(status);
-    final statusIcon = _getStatusIcon(status);
-
-    return InkWell(
-      onTap: () => _showLogDetails(context),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 5,
-              offset: const Offset(0, 2),
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: Space.xxl),
+      children: [
+        PageHeader(
+          title: 'Logbook',
+          actions: [
+            IconButton(
+              tooltip: 'Open a date',
+              onPressed: _jumpToDate,
+              icon: const Icon(Icons.calendar_today_outlined, size: 20, color: Palette.ink),
+            ),
+            TextButton.icon(
+              onPressed: _write,
+              icon: const Icon(Icons.add, size: 20),
+              label: const Text('New entry'),
             ),
           ],
         ),
+        if (calendar != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.page, 0),
+            child: DayProgress(
+              day: calendar.dayNumber(now),
+              of: calendar.totalDays,
+              trailing: '${(calendar.totalDays - calendar.dayNumber(now)).clamp(0, calendar.totalDays)} days left',
+            ),
+          ),
+        const SizedBox(height: Space.lg),
+        _filters(counts),
+        if (order.isEmpty)
+          EmptyNote(
+            _filter == _Filter.all ? 'No entries yet' : 'No ${_label(_filter).toLowerCase()} entries',
+            detail: _filter == _Filter.all ? 'Your first entry will appear here, under week 1.' : null,
+          ),
+        for (final w in order) ...[
+          if (calendar != null)
+            WeekHeading(
+              week: w,
+              start: calendar.weekStart(w),
+              end: calendar.weekEnd(w),
+              entries: weeks[w]!.length,
+              signedBy: _signoffs[w]?['supervisor_name'],
+              signedOn: parseDay(_signoffs[w]?['signed_at']),
+            ),
+          for (final log in weeks[w]!)
+            EntryLine(entry: log, reviewerInitials: initialsOf(_supervisorName), onTap: () => _open(log)),
+          if (_signoffs[w]?['comment'] != null && '${_signoffs[w]!['comment']}'.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.page, 0),
+              child: Text(
+                '“${_signoffs[w]!['comment']}” — ${initialsOf(_signoffs[w]!['supervisor_name'])}',
+                style: Txt.sans(Txt.small, color: Palette.inkSoft).copyWith(fontStyle: FontStyle.italic),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  String _label(_Filter f) => switch (f) {
+        _Filter.all => 'All',
+        _Filter.approved => 'Approved',
+        _Filter.pending => 'Pending',
+        _Filter.returned => 'Returned',
+      };
+
+  Widget _filters(Map<_Filter, int> counts) {
+    return Container(
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Palette.rule))),
+      padding: const EdgeInsets.symmetric(horizontal: Space.page - Space.sm),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            // Status indicator
-            Container(
-              width: 4,
-              height: 60,
-              decoration: BoxDecoration(
-                color: statusColor,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            for (final f in _Filter.values)
+              InkWell(
+                onTap: () => setState(() => _filter = f),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(Space.sm, Space.sm, Space.sm, 10),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(color: _filter == f ? Palette.ink : Colors.transparent, width: 2),
+                    ),
+                  ),
+                  child: Row(
                     children: [
                       Text(
-                        _formatDate(log['log_date']),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
+                        _label(f),
+                        style: Txt.sans(
+                          Txt.small,
+                          weight: _filter == f ? FontWeight.w600 : FontWeight.w500,
+                          color: _filter == f ? Palette.ink : Palette.inkSoft,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(statusIcon, size: 12, color: statusColor),
-                            const SizedBox(width: 4),
-                            Text(
-                              status.toUpperCase(),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: statusColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      const SizedBox(width: 6),
+                      Text('${counts[f]}', style: Txt.mono(Txt.label, color: Palette.inkFaint)),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    log['description'] ?? 'No description',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (log['skills_acquired'] != null) ...[
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.lightbulb_outline,
-                          size: 12,
-                          color: Colors.grey[500],
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            log['skills_acquired'],
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[600],
-                              fontStyle: FontStyle.italic,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right, color: Colors.grey[400]),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showLogDetails(BuildContext context) {
-    final status = log['status']?.toString() ?? 'pending';
-    final statusColor = _getStatusColor(status);
-    final canEdit =
-        status.toLowerCase() == 'pending' || status.toLowerCase() == 'rejected';
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) {
-          return Container(
-            decoration: const BoxDecoration(
-              color: Color.fromRGBO(
-                252,
-                242,
-                232,
-                1,
-              ), // Changed to match page background
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Column(
-              children: [
-                // Handle
-                Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[400],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                // Content
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _formatDate(log['log_date']),
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _getStatusIcon(status),
-                                    size: 16,
-                                    color: statusColor,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    status.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: statusColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Description',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          log['description'] ?? 'No description',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[800],
-                            height: 1.5,
-                          ),
-                        ),
-                        if (log['skills_acquired'] != null) ...[
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Skills Acquired',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            log['skills_acquired'],
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[800],
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                        if (log['challenges_faced'] != null) ...[
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Challenges Faced',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            log['challenges_faced'],
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[800],
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                        if (log['supervisor_comment'] != null) ...[
-                          const SizedBox(height: 24),
-                          const Divider(),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Supervisor Comment',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0A3D62).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: const Color(0xFF0A3D62).withOpacity(0.2),
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(
-                                  Icons.chat_bubble_outline,
-                                  size: 16,
-                                  color: Color(0xFF0A3D62),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    log['supervisor_comment'],
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
-                        // Action buttons for pending/rejected entries
-                        if (canEdit) ...[
-                          const SizedBox(height: 32),
-                          const Divider(),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    _showDeleteConfirmation(context);
-                                  },
-                                  icon: const Icon(Icons.delete_outline),
-                                  label: const Text('Delete'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.red,
-                                    side: const BorderSide(color: Colors.red),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    _showEditDialog(context);
-                                  },
-                                  icon: const Icon(Icons.edit_outlined),
-                                  label: const Text('Edit'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0A3D62),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showEditDialog(BuildContext context) {
-    final TextEditingController descriptionController = TextEditingController(
-      text: log['description'] ?? '',
-    );
-    final TextEditingController skillsController = TextEditingController(
-      text: log['skills_acquired'] ?? '',
-    );
-    final TextEditingController challengesController = TextEditingController(
-      text: log['challenges_faced'] ?? '',
-    );
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          bool isSaving = false;
-
-          return DraggableScrollableSheet(
-            initialChildSize: 0.75,
-            minChildSize: 0.5,
-            maxChildSize: 0.95,
-            builder: (context, scrollController) {
-              return Container(
-                decoration: const BoxDecoration(
-                  color: Color.fromRGBO(252, 242, 232, 1),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                ),
-                child: Column(
-                  children: [
-                    // Handle
-                    Container(
-                      margin: const EdgeInsets.only(top: 12),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[400],
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    // Header
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Edit Log Entry',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    // Content
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: scrollController,
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Description *',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: descriptionController,
-                              maxLines: 5,
-                              decoration: InputDecoration(
-                                hintText: 'Describe your activities...',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                filled: true,
-                                fillColor: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            const Text(
-                              'Skills Acquired',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: skillsController,
-                              maxLines: 3,
-                              decoration: InputDecoration(
-                                hintText: 'What skills did you learn?',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                filled: true,
-                                fillColor: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            const Text(
-                              'Challenges Faced',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: challengesController,
-                              maxLines: 3,
-                              decoration: InputDecoration(
-                                hintText: 'Any challenges or difficulties?',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                filled: true,
-                                fillColor: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    // Save button
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: const Color.fromRGBO(252, 242, 232, 1),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, -2),
-                          ),
-                        ],
-                      ),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: isSaving
-                              ? null
-                              : () async {
-                                  if (descriptionController.text
-                                      .trim()
-                                      .isEmpty) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Description is required',
-                                        ),
-                                        backgroundColor: Colors.orange,
-                                      ),
-                                    );
-                                    return;
-                                  }
-
-                                  setModalState(() {
-                                    isSaving = true;
-                                  });
-
-                                  try {
-                                    final result =
-                                        await RequestService.updateDailyLog(
-                                          log['id'],
-                                          {
-                                            'description': descriptionController
-                                                .text
-                                                .trim(),
-                                            'skills_acquired':
-                                                skillsController.text
-                                                    .trim()
-                                                    .isEmpty
-                                                ? null
-                                                : skillsController.text.trim(),
-                                            'challenges_faced':
-                                                challengesController.text
-                                                    .trim()
-                                                    .isEmpty
-                                                ? null
-                                                : challengesController.text
-                                                      .trim(),
-                                          },
-                                        );
-
-                                    if (!context.mounted) return;
-
-                                    Navigator.pop(context); // Close edit sheet
-
-                                    if (result != null &&
-                                        result['status'] == 'success') {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Log updated successfully',
-                                          ),
-                                          backgroundColor: Colors.green,
-                                        ),
-                                      );
-
-                                      // Call the callback to reload data
-                                      onLogUpdated();
-                                    } else {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            result?['message'] ??
-                                                'Failed to update log',
-                                          ),
-                                          backgroundColor: Colors.red,
-                                        ),
-                                      );
-                                    }
-                                  } catch (e) {
-                                    if (!context.mounted) return;
-
-                                    Navigator.pop(
-                                      context,
-                                    ); // Close edit sheet on error
-
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Error: ${e.toString()}'),
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    );
-                                  }
-                                },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0A3D62),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: isSaving
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : const Text(
-                                  'Save Changes',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  void _showDeleteConfirmation(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Log Entry'),
-        content: const Text(
-          'Are you sure you want to delete this log entry? This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext); // Close dialog
-
-              try {
-                final result = await RequestService.deleteDailyLog(log['id']);
-
-                if (!context.mounted) return;
-
-                if (result != null && result['status'] == 'success') {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Log deleted successfully'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-
-                  // Call the callback to reload data
-                  onLogUpdated();
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        result?['message'] ?? 'Failed to delete log',
-                      ),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (!context.mounted) return;
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error: ${e.toString()}'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }

@@ -1,292 +1,74 @@
 import 'package:flutter/material.dart';
 import 'package:siwes360/auth/login.dart';
+import 'package:siwes360/screens/student/firstLoginSetup.dart';
+import 'package:siwes360/theme/tokens.dart';
 import 'package:siwes360/utils/request.dart';
 import 'package:siwes360/utils/role_router.dart';
+import 'package:siwes360/widgets/logo.dart';
 
+/// Checks the saved session, then opens the right home screen or login.
+/// Same paper background and mark as the login screen, so the hand-off is seamless.
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({Key? key}) : super(key: key);
+  const SplashScreen({super.key});
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with TickerProviderStateMixin {
-  late AnimationController _logoController;
-  late AnimationController _fadeController;
-  late Animation<double> _logoAnimation;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-
+class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-
-    // Logo animation controller
-    _logoController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
-
-    // Fade animation controller
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-
-    // Logo scale animation
-    _logoAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
-    );
-
-    // Fade animation for text
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut),
-    );
-
-    // Slide animation for logo
-    _slideAnimation =
-        Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
-          CurvedAnimation(parent: _logoController, curve: Curves.easeOutBack),
-        );
-
-    _startAnimations();
+    _route();
   }
 
-  void _startAnimations() async {
-    // Start logo animation
-    await _logoController.forward();
-
-    // Start fade animation for text
-    await _fadeController.forward();
-
-    // Wait a bit before checking authentication
-    await Future.delayed(const Duration(milliseconds: 1000));
-
-    if (mounted) {
-      await _checkAuthAndNavigate();
-    }
-  }
-
-  Future<void> _checkAuthAndNavigate() async {
+  Future<void> _route() async {
+    // Long enough to read the mark, short enough not to be in the way.
+    final minimum = Future<void>.delayed(const Duration(milliseconds: 700));
+    Widget next = const Login();
     try {
-      // Initialize RequestService first and WAIT for it
-      if (!RequestService.isInitialized) {
-        await RequestService.initialize();
-      }
-
-      // Load token from storage
       await RequestService.loadAuthToken();
-
-      // Check if user data exists in storage
       final userData = await RequestService.loadUserData();
-
-      // Get the token after ensuring it's loaded
       final token = RequestService.authToken;
-
-      print('Debug - Token: $token');
-      print('Debug - UserData: $userData');
-      print('Debug - Role: ${userData?['role']}');
-
-      if (!mounted) return;
-
-      // If both token and user data exist, try to validate the token
-      if (token != null &&
-          token.isNotEmpty &&
-          userData != null &&
-          userData['role'] != null) {
-        // Try to fetch profile to validate token
-        try {
-          final profileResult = await RequestService.getProfile();
-
-          if (profileResult != null && profileResult['status'] == 'success') {
-            // Token is valid, navigate to role-based dashboard
-            final role = userData['role'];
-            print('✅ Auto-login successful for role: $role');
-
-            Navigator.of(context).pushReplacement(
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) =>
-                    RoleRouter.getHomeScreen(role),
-                transitionsBuilder:
-                    (context, animation, secondaryAnimation, child) {
-                      return FadeTransition(opacity: animation, child: child);
-                    },
-                transitionDuration: const Duration(milliseconds: 500),
-              ),
-            );
-            return;
-          }
-        } catch (e) {
-          // Token validation failed, clear data and redirect to login
-          print('❌ Token validation failed: $e');
+      if (token != null && token.isNotEmpty && userData != null && userData['role'] != null) {
+        final profile = await RequestService.getProfile();
+        if (profile != null && profile['status'] == 'success') {
+          final roleData = userData['role_data'];
+          final firstLogin = userData['role'] == 'student' &&
+              roleData is Map &&
+              (roleData['is_first_login'] == true || roleData['is_first_login'] == 1);
+          next = firstLogin
+              ? FirstLoginSetup(userData: Map<String, dynamic>.from(userData))
+              : RoleRouter.getHomeScreen('${userData['role']}');
+        } else {
           await RequestService.clearUserData();
-
-          if (!mounted) return;
-
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) =>
-                  const Login(),
-              transitionsBuilder:
-                  (context, animation, secondaryAnimation, child) {
-                    return FadeTransition(opacity: animation, child: child);
-                  },
-              transitionDuration: const Duration(milliseconds: 500),
-            ),
-          );
-          return;
         }
       }
-
-      print('❌ No valid session found, redirecting to login');
-      // Clear any invalid data
+    } catch (_) {
       await RequestService.clearUserData();
-
-      // Navigate to login
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              const Login(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 500),
-        ),
-      );
-    } catch (e) {
-      print('❌ Auth check error: $e');
-
-      // Clear any potentially corrupted data
-      await RequestService.clearUserData();
-
-      if (!mounted) return;
-
-      // On error, navigate to login
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              const Login(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 500),
-        ),
-      );
     }
-  }
-
-  @override
-  void dispose() {
-    _logoController.dispose();
-    _fadeController.dispose();
-    super.dispose();
+    await minimum;
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (context, _, _) => next,
+        transitionsBuilder: (context, animation, _, child) => FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFFAFAFA), Colors.white],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Logo with animations
-                      SlideTransition(
-                        position: _slideAnimation,
-                        child: ScaleTransition(
-                          scale: _logoAnimation,
-                          child: Container(
-                            padding: const EdgeInsets.all(20),
-                            child: Image.asset(
-                              "assets/images/siwes360 header.png",
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      // App name with fade animation
-                      FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: const Text(
-                          'SIWES360',
-                          style: TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w300,
-                            color: Color(0xFF262626),
-                            letterSpacing: 1.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // Bottom section with loading and branding
-              Padding(
-                padding: const EdgeInsets.only(bottom: 50),
-                child: Column(
-                  children: [
-                    // Loading indicator
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Color(0xFF0A3D62),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 30),
-                    // Bottom branding
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: Column(
-                        children: [
-                          Text(
-                            'from',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'SIWES360 Team',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Color(0xFF0A3D62),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SiwesLogo(markSize: 72, tagline: 'The SIWES logbook'),
+            const SizedBox(height: Space.xxl),
+            const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          ],
         ),
       ),
     );

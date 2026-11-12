@@ -1,14 +1,18 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:siwes360/screens/student/addNewLogbookEntry.dart';
+import 'package:siwes360/screens/student/entry_sheet.dart';
 import 'package:siwes360/screens/student/studentLogbook.dart';
-import 'package:siwes360/screens/student/studentNotifications.dart';
-import 'package:siwes360/utils/custom_page_route.dart';
+import 'package:siwes360/screens/shared/notifications.dart';
+import 'package:siwes360/screens/student/student_nav.dart';
+import 'package:siwes360/theme/tokens.dart';
+import 'package:siwes360/utils/internship_calendar.dart';
 import 'package:siwes360/utils/request.dart';
-import 'package:siwes360/widgets/studentbottomNavBar.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:siwes360/utils/session.dart';
+import 'package:siwes360/widgets/logbook_widgets.dart';
+import 'package:siwes360/widgets/paper.dart';
 
+/// The student's "Today" tab. It answers one question: have I logged today?
+/// Then this week's Mon–Fri marks, the day count, and who signs the logbook.
 class StudentDashboard extends StatefulWidget {
   const StudentDashboard({super.key});
 
@@ -17,1006 +21,302 @@ class StudentDashboard extends StatefulWidget {
 }
 
 class _StudentDashboardState extends State<StudentDashboard> {
-  bool _isLoading = true;
-  Map<String, dynamic>? _dashboardData;
-  String _errorMessage = '';
-  String? _profileImagePath;
+  bool _loading = true;
+  String? _error;
+  Map<String, dynamic> _student = {};
+  Map<String, dynamic>? _supervisor;
+  List<Map<String, dynamic>> _logs = [];
+  List<Map<String, dynamic>> _signoffs = [];
+  int _unread = 0;
+  String? _photo;
 
   @override
   void initState() {
     super.initState();
-    _loadDashboardData();
+    _load();
   }
 
-  Future<void> _loadProfileImage() async {
-    try {
-      final userData = await RequestService.loadUserData();
-      if (userData != null && userData['role_data'] != null) {
-        final studentId = userData['role_data']['user_id'];
-        final box = await Hive.openBox('studentProfile');
-        final imagePath = box.get('profile_image_$studentId');
-
-        if (imagePath != null && await File(imagePath).exists()) {
-          if (mounted) {
-            setState(() {
-              _profileImagePath = imagePath;
-            });
-          }
-        }
-      }
-    } catch (e) {
-      print('Error loading profile image: $e');
-    }
-  }
-
-  int _parseStatValue(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
-  }
-
-  Future<void> _loadDashboardData() async {
+  Future<void> _load() async {
     setState(() {
-      _isLoading = true;
-      _errorMessage = '';
+      _loading = _student.isEmpty;
+      _error = null;
     });
-
-    try {
-      // Load user data from local storage
-      final userData = await RequestService.loadUserData();
-
-      if (userData == null || userData['role_data'] == null) {
-        setState(() {
-          _errorMessage = 'User data not found. Please login again.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final studentId = userData['role_data']['user_id'];
-
-      // Fetch dashboard data from API
-      final result = await RequestService.getStudentDashboardData(studentId);
-
-      if (result != null && result['status'] == 'success') {
-        setState(() {
-          _dashboardData = result['data'];
-          _isLoading = false;
-        });
-
-        // Load profile image after dashboard data is loaded
-        await _loadProfileImage();
-      } else {
-        setState(() {
-          _errorMessage = result?['message'] ?? 'Failed to load dashboard data';
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
+    final session = await Session.load();
+    if (session == null) {
+      if (mounted) Session.signOut(context);
+      return;
+    }
+    final id = (session.roleData['user_id'] as num?)?.toInt() ?? session.id;
+    final results = await Future.wait([
+      RequestService.getStudentDashboardData(id),
+      RequestService.getAllDailyLogs(id),
+      RequestService.getStudentSignoffs(id),
+      RequestService.getNotifications(session.id),
+    ]);
+    final photo = await Session.photoPath('student', id);
+    if (!mounted) return;
+    final dashboard = results[0];
+    if (dashboard?['status'] != 'success') {
       setState(() {
-        _errorMessage = 'Error loading dashboard: ${e.toString()}';
-        _isLoading = false;
+        _loading = false;
+        _error = dashboard?['message'] ?? 'Check your connection and try again.';
       });
+      return;
     }
+    setState(() {
+      _loading = false;
+      _student = Map<String, dynamic>.from(dashboard!['data']['student'] ?? {});
+      _supervisor = dashboard['data']['supervisor'] == null ? null : Map<String, dynamic>.from(dashboard['data']['supervisor']);
+      _logs = _list(results[1]);
+      _signoffs = _list(results[2]);
+      _unread = _list(results[3]).where((n) => n['is_read'] == 0 || n['is_read'] == false).length;
+      _photo = photo;
+    });
   }
 
-  String _formatDate(dynamic dateValue) {
-    try {
-      if (dateValue == null) return 'No date';
+  List<Map<String, dynamic>> _list(Map<String, dynamic>? result) => result?['status'] == 'success'
+      ? List<Map<String, dynamic>>.from((result!['data'] as List? ?? []).map((e) => Map<String, dynamic>.from(e)))
+      : [];
 
-      DateTime date;
+  InternshipCalendar? get _calendar => InternshipCalendar.from(_student['internship_start_date'], _student['internship_end_date']);
 
-      if (dateValue is String) {
-        // Check if it's already in YYYY-MM-DD format (no time component)
-        if (dateValue.length == 10 && !dateValue.contains('T')) {
-          // Parse as local date
-          final parts = dateValue.split('-');
-          date = DateTime(
-            int.parse(parts[0]), // year
-            int.parse(parts[1]), // month
-            int.parse(parts[2]), // day
-          );
-        } else {
-          // Parse ISO string but use only the date part
-          date = DateTime.parse(dateValue.split('T')[0]);
-        }
-      } else if (dateValue is DateTime) {
-        date = dateValue;
-      } else {
-        return 'Invalid date';
-      }
-
-      return DateFormat('MMM dd, yyyy').format(date);
-    } catch (e) {
-      print('Error formatting date: $e');
-      return 'Invalid date';
+  Map<String, dynamic>? _entryOn(DateTime day) {
+    for (final log in _logs) {
+      final d = parseDay(log['log_date']);
+      if (d != null && sameDay(d, day)) return log;
     }
+    return null;
   }
 
-  String _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return 'green';
-      case 'pending':
-        return 'orange';
-      case 'rejected':
-        return 'red';
-      default:
-        return 'grey';
-    }
+  Future<void> _write() async {
+    final created = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const AddNewLogEntry()));
+    if (created == true) _load();
   }
 
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'approved':
-        return Icons.check_circle;
-      case 'pending':
-        return Icons.access_time;
-      case 'rejected':
-        return Icons.cancel;
-      default:
-        return Icons.help_outline;
-    }
-  }
-
-  Color _getColorFromString(String colorName) {
-    switch (colorName) {
-      case 'green':
-        return Colors.green;
-      case 'orange':
-        return Colors.orange;
-      case 'red':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
+  Future<void> _open(Map<String, dynamic> entry) async {
+    final d = parseDay(entry['log_date']);
+    final changed = await showEntrySheet(
+      context,
+      entry,
+      reviewerName: _supervisor?['full_name'],
+      week: d == null ? null : _calendar?.weekOf(d),
+      canEdit: true,
+    );
+    if (changed) _load();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+    return Scaffold(
+      bottomNavigationBar: const StudentNavBar(currentIndex: 0),
+      body: SafeArea(
+        bottom: false,
+        child: _loading
+            ? const LoadingView()
+            : _error != null
+                ? ErrorView(message: _error!, onRetry: _load)
+                : RefreshIndicator(color: Palette.ink, onRefresh: _load, child: _body()),
+      ),
+    );
+  }
+
+  Widget _body() {
+    final now = today();
+    final calendar = _calendar;
+    final week = calendar?.weekOf(now);
+    final todayEntry = _entryOn(now);
+    final monday = InternshipCalendar.mondayOf(now);
+    final logged = _logs.map((l) => parseDay(l['log_date'])).whereType<DateTime>().toSet();
+    final marks = WeekMarks.marksFor(monday, logged, calendar: calendar);
+    final loggedThisWeek = marks.where((m) => m == DayMark.logged).length;
+    final dueThisWeek = marks.where((m) => m != DayMark.upcoming && m != DayMark.outside).length;
+    final returned = _logs.where((l) => EntryStatus.of(l['status']) == EntryStatus.rejected).toList();
+    final lastSignoff = _signoffs.isEmpty ? null : _signoffs.last;
+    final weeksDone = calendar == null ? 0 : (calendar.weekOf(now) - 1).clamp(0, calendar.totalWeeks);
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: Space.xxl),
+      children: [
+        // Who and when.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.sm, 0),
+          child: Row(
             children: [
-              const CircularProgressIndicator(color: Color(0xFF0A3D62)),
-              const SizedBox(height: 16),
-              Text(
-                'Loading dashboard...',
-                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              Monogram(name: _student['full_name'], size: 36, photoPath: _photo),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_student['full_name'] ?? ''}', style: Txt.sans(Txt.small, weight: FontWeight.w600, color: Palette.ink)),
+                    Text('${_student['matric_no'] ?? ''}', style: Txt.mono(Txt.label, color: Palette.inkSoft)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: _unread > 0 ? 'Notifications, $_unread unread' : 'Notifications',
+                onPressed: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                  _load();
+                },
+                icon: Badge(
+                  isLabelVisible: _unread > 0,
+                  backgroundColor: Palette.brick,
+                  smallSize: 7,
+                  child: const Icon(Icons.notifications_none, color: Palette.ink),
+                ),
               ),
             ],
           ),
         ),
-      );
-    }
-
-    if (_errorMessage.isNotEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _loadDashboardData,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0A3D62),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: const Text(
-                    'Retry',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
+        const SizedBox(height: Space.xl),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Space.page),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                [Dates.short(now).toUpperCase(), if (week != null && calendar!.contains(now)) 'WEEK $week'].join(' · '),
+                style: Txt.mono(Txt.small, weight: FontWeight.w500, color: Palette.inkSoft),
+              ),
+              const SizedBox(height: Space.sm),
+              ..._todayStatus(now, calendar, todayEntry),
+            ],
           ),
         ),
-      );
-    }
 
-    final student = _dashboardData?['student'];
-    final supervisor = _dashboardData?['supervisor'];
-    final progress = _dashboardData?['progress'];
-    final recentLogs = _dashboardData?['recent_logs'] ?? [];
-    final stats = _dashboardData?['statistics'];
-
-    return Scaffold(
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _loadDashboardData,
-          color: const Color(0xFF0A3D62),
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Padding(
-              padding: const EdgeInsets.only(
-                top: 15.0,
-                left: 20.0,
-                right: 20.0,
-                bottom: 20.0,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header with Profile Image
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          // Profile Avatar with Image Support
-                          Container(
-                            width: 50,
-                            height: 50,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: const Color(0xFF0A3D62),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: ClipOval(
-                              child: _profileImagePath != null
-                                  ? Image.file(
-                                      File(_profileImagePath!),
-                                      fit: BoxFit.cover,
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                            return Center(
-                                              child: Text(
-                                                (student?['full_name'] ?? 'U')
-                                                    .substring(0, 1)
-                                                    .toUpperCase(),
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 20,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                    )
-                                  : Center(
-                                      child: Text(
-                                        (student?['full_name'] ?? 'U')
-                                            .substring(0, 1)
-                                            .toUpperCase(),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          const Text(
-                            'Dashboard',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Stack(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.notifications_outlined),
-                            onPressed: () {
-                              context.pushFade(const StudentNotifications());
-                            },
-                          ),
-                          if (_parseStatValue(stats?['pending_logs']) > 0)
-                            Positioned(
-                              right: 8,
-                              top: 8,
-                              child: Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Welcome Message
-                  Text(
-                    'Hello, ${student?['full_name']?.split(' ')[0] ?? 'Student'}!',
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Keep up the great work on your internship.',
-                    style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 30),
-
-                  // Progress Card
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'OVERVIEW',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Internship Progress',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        Center(
-                          child: SizedBox(
-                            width: 150,
-                            height: 150,
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 150,
-                                  height: 150,
-                                  child: CircularProgressIndicator(
-                                    value: (progress?['percentage'] ?? 0) / 100,
-                                    strokeWidth: 12,
-                                    backgroundColor: Colors.grey[300],
-                                    valueColor:
-                                        const AlwaysStoppedAnimation<Color>(
-                                          Color(0xFF0A3D62),
-                                        ),
-                                  ),
-                                ),
-                                Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      '${progress?['percentage'] ?? 0}%',
-                                      style: const TextStyle(
-                                        fontSize: 36,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Completed',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        Text(
-                          'Start Date: ${_formatDate(student?['internship_start_date'])}',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        Text(
-                          'End Date: ${_formatDate(student?['internship_end_date'])}',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Days Stats
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Days Completed',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 14,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${progress?['daysCompleted'] ?? 0}',
-                                style: const TextStyle(
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Days Remaining',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 14,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${progress?['daysRemaining'] ?? 0}',
-                                style: const TextStyle(
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Write Log Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        // Navigate and wait for result
-                        // final result = await Navigator.push(
-                        //   context,
-                        //   MaterialPageRoute(
-                        //     builder: (context) => const AddNewLogEntry(),
-                        //   ),
-                        // );
-                        final result = await context.pushSlideUp(
-                          const AddNewLogEntry(),
-                        );
-                        // If a log was created successfully, reload dashboard
-                        if (result == true) {
-                          _loadDashboardData();
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0A3D62),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.edit_outlined, color: Colors.white),
-                          SizedBox(width: 8),
-                          Text(
-                            'Write New Logbook Entry',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-
-                  // Recent Entries
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Recent Entries',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          // Navigate to all logs and reload on return
-                          // final result = await Navigator.push(
-                          //   context,
-                          //   MaterialPageRoute(
-                          //     builder: (context) => const StudentLogbook(),
-                          //   ),
-                          // );
-                          final result = await context.pushFade(
-                            const StudentLogbook(),
-                          );
-
-                          if (result == true) {
-                            _loadDashboardData();
-                          }
-                        },
-                        child: const Text(
-                          'View All',
-                          style: TextStyle(color: Color(0xFF0A3D62)),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Entry Cards
-                  if (recentLogs.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(32),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Center(
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.note_add_outlined,
-                              size: 48,
-                              color: Colors.grey[400],
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No log entries yet',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    ...recentLogs.take(3).map((log) {
-                      final statusColor = _getStatusColor(
-                        log['status'] ?? 'pending',
-                      );
-                      final statusIcon = _getStatusIcon(
-                        log['status'] ?? 'pending',
-                      );
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildEntryCard(
-                          log['description'] ?? 'No description',
-                          _formatDate(log['log_date']),
-                          log['status'] ?? 'pending',
-                          _getColorFromString(statusColor),
-                          statusIcon,
-                        ),
-                      );
-                    }).toList(),
-
-                  const SizedBox(height: 30),
-
-                  // Supervisor Section
-                  const Text(
-                    'Supervisor',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // // ADDED: Show supervisor source indicator
-                  // if (_dashboardData?['supervisor_source'] != null)
-                  //   Container(
-                  //     margin: const EdgeInsets.only(bottom: 12),
-                  //     padding: const EdgeInsets.symmetric(
-                  //       horizontal: 12,
-                  //       vertical: 8,
-                  //     ),
-                  //     decoration: BoxDecoration(
-                  //       color:
-                  //           _dashboardData!['supervisor_source'] == 'database'
-                  //           ? Colors.green[50]
-                  //           : Colors.orange[50],
-                  //       borderRadius: BorderRadius.circular(8),
-                  //       border: Border.all(
-                  //         color:
-                  //             _dashboardData!['supervisor_source'] == 'database'
-                  //             ? Colors.green[200]!
-                  //             : Colors.orange[200]!,
-                  //       ),
-                  //     ),
-                  //     child: Row(
-                  //       children: [
-                  //         Icon(
-                  //           _dashboardData!['supervisor_source'] == 'database'
-                  //               ? Icons.link
-                  //               : Icons.edit_note,
-                  //           size: 16,
-                  //           color:
-                  //               _dashboardData!['supervisor_source'] ==
-                  //                   'database'
-                  //               ? Colors.green[700]
-                  //               : Colors.orange[700],
-                  //         ),
-                  //         const SizedBox(width: 8),
-                  //         Expanded(
-                  //           child: Text(
-                  //             _dashboardData!['supervisor_source'] == 'database'
-                  //                 ? 'Linked from database - Can approve logs'
-                  //                 : 'Manually entered - Cannot approve logs yet',
-                  //             style: TextStyle(
-                  //               fontSize: 12,
-                  //               color:
-                  //                   _dashboardData!['supervisor_source'] ==
-                  //                       'database'
-                  //                   ? Colors.green[700]
-                  //                   : Colors.orange[700],
-                  //               fontWeight: FontWeight.w600,
-                  //             ),
-                  //           ),
-                  //         ),
-                  //       ],
-                  //     ),
-                  //   ),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: supervisor != null
-                        ? Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 35,
-                                backgroundColor: const Color(0xFF0A3D62),
-                                child: Text(
-                                  (supervisor['full_name'] ?? 'S')
-                                      .substring(0, 1)
-                                      .toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 25),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      supervisor['full_name'] ?? 'Not Assigned',
-                                      style: const TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      supervisor['position'] ??
-                                          'Industry Supervisor',
-                                      style: const TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    if (supervisor['organization'] != null)
-                                      Text(
-                                        supervisor['organization'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    // ADDED: Show contact info if available
-                                    if (supervisor['email'] != null)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Text(
-                                          supervisor['email'],
-                                          style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          )
-                        : Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.person_off_outlined,
-                                    size: 48,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'No supervisor assigned yet',
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // Statistics Cards
-                  const Text(
-                    'Stats',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildStatCard(
-                          'Total Logs',
-                          _parseStatValue(stats?['total_logs']).toString(),
-                          Icons.description_outlined,
-                          Colors.blue,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildStatCard(
-                          'Approved',
-                          _parseStatValue(stats?['approved_logs']).toString(),
-                          Icons.check_circle_outline,
-                          Colors.green,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildStatCard(
-                          'Pending',
-                          _parseStatValue(stats?['pending_logs']).toString(),
-                          Icons.pending_outlined,
-                          Colors.orange,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildStatCard(
-                          'Rejected',
-                          _parseStatValue(stats?['rejected_logs']).toString(),
-                          Icons.cancel_outlined,
-                          Colors.red,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+        if (calendar != null && !now.isBefore(calendar.start)) ...[
+          SectionLabel(
+            'This week',
+            trailing: Text('$loggedThisWeek of $dueThisWeek days', style: Txt.mono(Txt.small, color: Palette.inkSoft)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.page),
+            child: WeekMarks(
+              monday: monday,
+              marks: marks,
+              onTapDay: (day) {
+                final entry = _entryOn(day);
+                if (entry != null) _open(entry);
+              },
             ),
           ),
+        ],
+
+        if (calendar != null) ...[
+          const SectionLabel('Internship'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.page),
+            child: DayProgress(
+              day: calendar.dayNumber(now),
+              of: calendar.totalDays,
+              trailing: 'ends ${Dates.full(calendar.end)}',
+            ),
+          ),
+          const SizedBox(height: Space.lg),
+          const Rule(),
+        ],
+        LedgerRow(
+          child: _rowText(
+            'Supervisor',
+            _supervisor == null
+                ? 'Not linked yet'
+                : [_supervisor!['full_name'], _supervisor!['organization']].where((v) => v != null).join(', '),
+          ),
         ),
-      ),
-      bottomNavigationBar: const BottomNavBar(currentIndex: 0),
+        LedgerRow(
+          trailing: lastSignoff == null
+              ? null
+              : SignOffStamp(
+                  week: (lastSignoff['week_number'] as num).toInt(),
+                  signedBy: '${lastSignoff['supervisor_name']}',
+                  compact: true,
+                ),
+          child: _rowText(
+            'Weeks signed off',
+            calendar == null ? '—' : '${_signoffs.length} of $weeksDone finished weeks',
+            mono: true,
+          ),
+        ),
+        if (returned.isNotEmpty)
+          LedgerRow(
+            onTap: () => _open(returned.first),
+            trailing: const Stamp(EntryStatus.rejected),
+            child: _rowText(
+              'Returned for changes',
+              returned.length == 1
+                  ? Dates.short(parseDay(returned.first['log_date'])!)
+                  : '${returned.length} entries, oldest ${Dates.short(parseDay(returned.last['log_date'])!)}',
+              mono: true,
+            ),
+          ),
+        LedgerRow(
+          onTap: () => Navigator.of(context).pushReplacement(
+            PageRouteBuilder(pageBuilder: (_, _, _) => const StudentLogbook(), transitionDuration: Duration.zero),
+          ),
+          child: _rowText('All entries', plural(_logs.length, 'entry', 'entries'), mono: true),
+        ),
+      ],
     );
   }
 
-  Widget _buildEntryCard(
-    String title,
-    String date,
-    String status,
-    Color statusColor,
-    IconData icon,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
+  List<Widget> _todayStatus(DateTime now, InternshipCalendar? calendar, Map<String, dynamic>? entry) {
+    String title;
+    String detail;
+    Widget? action;
+    final supervisorName = _supervisor?['full_name'];
+
+    if (entry != null) {
+      final status = EntryStatus.of(entry['status']);
+      title = 'Logged today';
+      detail = switch (status) {
+        EntryStatus.pending => supervisorName == null ? 'Waiting for review.' : 'Waiting for $supervisorName to review.',
+        EntryStatus.approved => 'Approved already.',
+        EntryStatus.rejected => 'Returned with a comment. Edit it and send it back.',
+      };
+      action = SecondaryButton(label: "Open today's entry", onPressed: () => _open(entry));
+    } else if (calendar == null) {
+      title = 'Internship dates not set';
+      detail = 'Add your start and end dates in your profile.';
+    } else if (now.isBefore(calendar.start)) {
+      title = 'Starts ${Dates.short(calendar.start)}';
+      detail = 'Your first entry is due on your first day.';
+    } else if (now.isAfter(calendar.end)) {
+      title = 'Internship finished';
+      detail = 'Your last day was ${Dates.full(calendar.end)}.';
+    } else if (!isWorkingDay(now)) {
+      title = 'No entry due today';
+      detail = "It's the weekend. You can still write up a day you missed.";
+      action = SecondaryButton(label: 'Write an entry', onPressed: _write);
+    } else {
+      title = 'Not logged yet today';
+      detail = 'Write down what you did before you leave work.';
+      action = PrimaryButton(label: "Write today's entry", onPressed: _write);
+    }
+
+    return [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: statusColor, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  date,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-          Text(
-            status.toUpperCase(),
-            style: TextStyle(
-              color: statusColor,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
-          ),
+          Expanded(child: Text(title, style: Txt.displayStyle)),
+          if (entry != null) Stamp(EntryStatus.of(entry['status']), initials: initialsOf(supervisorName)),
         ],
       ),
-    );
+      const SizedBox(height: Space.xs),
+      Text(detail, style: Txt.smallStyle),
+      if (action != null) ...[const SizedBox(height: Space.lg), action],
+    ];
   }
 
-  Widget _buildStatCard(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+  Widget _rowText(String label, String value, {bool mono = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Txt.smallStyle),
+        const SizedBox(height: 2),
+        Text(value, style: mono ? Txt.mono(Txt.small, weight: FontWeight.w500) : Txt.sans(Txt.body, weight: FontWeight.w500)),
+      ],
     );
   }
 }

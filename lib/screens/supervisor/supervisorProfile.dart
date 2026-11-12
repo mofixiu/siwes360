@@ -1,12 +1,15 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:siwes360/screens/shared/settings.dart';
 import 'package:siwes360/screens/supervisor/editSupervisorProfile.dart';
-import 'package:siwes360/screens/supervisor/supervisorSettings.dart';
-import 'package:siwes360/utils/custom_page_route.dart';
+import 'package:siwes360/screens/supervisor/supervisor_nav.dart';
+import 'package:siwes360/theme/tokens.dart';
+import 'package:siwes360/utils/internship_calendar.dart';
 import 'package:siwes360/utils/request.dart';
-import 'package:siwes360/widgets/supervisorbottomNavBar.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:siwes360/utils/session.dart';
+import 'package:siwes360/widgets/paper.dart';
 
+/// The supervisor's contact and workplace details, and the institutions their
+/// interns come from.
 class SupervisorProfile extends StatefulWidget {
   const SupervisorProfile({super.key});
 
@@ -15,787 +18,139 @@ class SupervisorProfile extends StatefulWidget {
 }
 
 class _SupervisorProfileState extends State<SupervisorProfile> {
-  String _selectedTab = 'students';
-  bool _isLoading = true;
-  Map<String, dynamic>? _profileData;
+  bool _loading = true;
+  String? _error;
+  int? _id;
+  Map<String, dynamic> _s = {};
   List<Map<String, dynamic>> _students = [];
-  List<Map<String, dynamic>> _institutions = [];
-  String _errorMessage = '';
-  String _bio = '';
-  String? _profileImagePath;
+  String? _photo;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
-    _loadBio();
+    _load();
   }
 
-  Future<void> _loadProfileImage() async {
-    try {
-      final userData = await RequestService.loadUserData();
-      if (userData != null && userData['role_data'] != null) {
-        final supervisorId = userData['role_data']['user_id'];
-        final box = await Hive.openBox('supervisorProfile');
-        final imagePath = box.get('profile_image_$supervisorId');
-
-        if (imagePath != null && await File(imagePath).exists()) {
-          setState(() {
-            _profileImagePath = imagePath;
-          });
-        }
-      }
-    } catch (e) {
-      print('Error loading profile image: $e');
+  Future<void> _load() async {
+    final session = await Session.load();
+    if (session == null) {
+      if (mounted) Session.signOut(context);
+      return;
     }
-  }
-
-  Future<void> _loadProfile() async {
+    final results = await Future.wait([
+      RequestService.getSupervisorById(session.id),
+      RequestService.getSupervisorStudents(session.id),
+    ]);
+    final photo = await Session.photoPath('supervisor', session.id);
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
-      _errorMessage = '';
+      _loading = false;
+      _id = session.id;
+      _photo = photo;
+      if (results[0]?['status'] == 'success') {
+        _error = null;
+        _s = Map<String, dynamic>.from(results[0]!['data']);
+        _students = results[1]?['status'] == 'success'
+            ? List<Map<String, dynamic>>.from((results[1]!['data'] as List).map((e) => Map<String, dynamic>.from(e)))
+            : [];
+      } else {
+        _error = results[0]?['message'] ?? 'Check your connection and try again.';
+      }
     });
-
-    try {
-      final userData = await RequestService.loadUserData();
-
-      if (userData == null || userData['role_data'] == null) {
-        setState(() {
-          _errorMessage = 'User data not found. Please login again.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final supervisorId = userData['role_data']['user_id'];
-      final result = await RequestService.getSupervisorById(supervisorId);
-
-      if (result != null && result['status'] == 'success') {
-        setState(() {
-          _profileData = result['data'];
-        });
-
-        await _loadStudents(supervisorId);
-        await _loadProfileImage();
-      } else {
-        setState(() {
-          _errorMessage = result?['message'] ?? 'Failed to load profile';
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error loading profile: ${e.toString()}';
-        _isLoading = false;
-      });
-    }
   }
 
-  Future<void> _loadStudents(int supervisorId) async {
-    try {
-      final result = await RequestService.getSupervisorStudents(supervisorId);
-
-      if (result != null && result['status'] == 'success') {
-        final students = List<Map<String, dynamic>>.from(result['data'] ?? []);
-
-        // Group students by institution
-        Map<String, int> institutionCounts = {};
-        for (var student in students) {
-          final school = student['school_name'] ?? 'Unknown Institution';
-          institutionCounts[school] = (institutionCounts[school] ?? 0) + 1;
-        }
-
-        // Create institutions list
-        final institutions = institutionCounts.entries.map((entry) {
-          return {
-            'name': entry.key,
-            'studentCount': entry.value,
-            'icon': Icons.school,
-          };
-        }).toList();
-
-        setState(() {
-          _students = students;
-          _institutions = institutions;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+  Future<void> _edit() async {
+    if (_id == null) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditSupervisorProfile(supervisorId: _id!)));
+    _load();
   }
 
-  Future<void> _loadBio() async {
-    try {
-      final box = await Hive.openBox('supervisorData');
-      final savedBio = box.get('bio', defaultValue: '');
-      setState(() {
-        _bio = savedBio;
-      });
-    } catch (e) {
-      print('Error loading bio: $e');
-    }
-  }
+  String _v(String key) => '${_s[key] ?? ''}';
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
-        body: const Center(
-          child: CircularProgressIndicator(color: Color(0xFF0A3D62)),
-        ),
-        bottomNavigationBar: const SupervisorBottomNavBar(currentIndex: 2),
-      );
+    final schools = <String, int>{};
+    for (final st in _students) {
+      final name = '${st['school_name'] ?? 'Institution not set'}';
+      schools[name] = (schools[name] ?? 0) + 1;
     }
-
-    if (_errorMessage.isNotEmpty) {
-      return Scaffold(
-        backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _loadProfile,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0A3D62),
-                ),
-                child: const Text(
-                  'Retry',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          ),
-        ),
-        bottomNavigationBar: const SupervisorBottomNavBar(currentIndex: 2),
-      );
-    }
-
     return Scaffold(
-      backgroundColor: const Color.fromRGBO(252, 242, 232, 1),
+      bottomNavigationBar: const SupervisorNavBar(currentIndex: 2),
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _loadProfile,
-          color: const Color(0xFF0A3D62),
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Profile',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.settings_outlined,
-                          color: Color(0xFF0A3D62),
-                        ),
-                        onPressed: () {
-                          context.pushFade(const SupervisorSettings());
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Profile Card
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    children: [
-                      // Profile Picture with Image Support
-                      Container(
-                        width: 120,
-                        height: 120,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFF0A3D62),
-                        ),
-                        child: ClipOval(
-                          child: _profileImagePath != null
-                              ? Image.file(
-                                  File(_profileImagePath!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Center(
-                                      child: Text(
-                                        (_profileData?['full_name'] ?? 'U')
-                                            .substring(0, 1)
-                                            .toUpperCase(),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 48,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                )
-                              : Center(
-                                  child: Text(
-                                    (_profileData?['full_name'] ?? 'U')
-                                        .substring(0, 1)
-                                        .toUpperCase(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 48,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Name
-                      Text(
-                        _profileData?['full_name'] ?? 'Unknown',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-
-                      // Position
-                      Text(
-                        _profileData?['position'] ?? 'Industry Supervisor',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _profileData?['organization'] ?? 'N/A',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF0A3D62),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Edit Profile Button
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            final result = await context.pushFade(
-                              EditSupervisorProfile(
-                                supervisorId: _profileData!['user_id'],
-                              ),
-                            );
-
-                            // Reload profile if changes were saved
-                            if (result == true && mounted) {
-                              _loadProfile();
-                              _loadBio();
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0A3D62),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text(
-                            'Edit Profile',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Personal Details Section
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Contact Details',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildInfoRow(
-                        Icons.email_outlined,
-                        'Email',
-                        _profileData?['email'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.phone_outlined,
-                        'Phone Number',
-                        _profileData?['phone'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.work_outline,
-                        'Position',
-                        _profileData?['position'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-                      const SizedBox(height: 12),
-
-                      _buildInfoRow(
-                        Icons.business_outlined,
-                        'Organization',
-                        _profileData?['organization'] ?? 'N/A',
-                        Colors.grey[200]!,
-                      ),
-
-                      // Show bio if available
-                      if (_bio.isNotEmpty) ...[
-                        const SizedBox(height: 20),
-                        const Text(
-                          'About',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue[200]!),
-                          ),
-                          child: Text(
-                            _bio,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[800],
-                              height: 1.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Management Section
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            'Management',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0A3D62).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              '${_students.length} ${_students.length == 1 ? 'Student' : 'Students'}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0A3D62),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Tabs
-                      Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedTab = 'students';
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _selectedTab == 'students'
-                                        ? const Color(0xFF0A3D62)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'Intern Students',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: _selectedTab == 'students'
-                                          ? Colors.white
-                                          : Colors.grey[600],
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedTab = 'institutions';
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _selectedTab == 'institutions'
-                                        ? const Color(0xFF0A3D62)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'Institutions',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: _selectedTab == 'institutions'
-                                          ? Colors.white
-                                          : Colors.grey[600],
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ),
+        bottom: false,
+        child: _loading
+            ? const LoadingView()
+            : _error != null
+                ? ErrorView(message: _error!, onRetry: _load)
+                : RefreshIndicator(
+                    color: Palette.ink,
+                    onRefresh: _load,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: Space.xxl),
+                      children: [
+                        PageHeader(
+                          title: 'Profile',
+                          actions: [
+                            IconButton(
+                              tooltip: 'Settings',
+                              icon: const Icon(Icons.settings_outlined, color: Palette.ink),
+                              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
                             ),
                           ],
                         ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Content based on selected tab
-                      if (_selectedTab == 'students')
-                        _students.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(32),
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        Icons.people_outline,
-                                        size: 48,
-                                        color: Colors.grey[400],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        'No students assigned yet',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              )
-                            : Column(
-                                children: _students.map((student) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 12),
-                                    child: _buildStudentTile(
-                                      student['full_name'] ?? 'Unknown',
-                                      student['matric_no'] ?? 'N/A',
-                                      student['school_name'] ??
-                                          'Unknown Institution',
-                                      student['department'] ?? '',
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(Space.page, Space.xl, Space.page, 0),
+                          child: Row(
+                            children: [
+                              Monogram(name: _v('full_name'), size: 64, photoPath: _photo),
+                              const SizedBox(width: Space.lg),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(_v('full_name'), style: Txt.titleStyle),
+                                    Text(
+                                      [_s['position'], _s['organization']].where((v) => v != null && '$v'.isNotEmpty).join(', '),
+                                      style: Txt.smallStyle,
                                     ),
-                                  );
-                                }).toList(),
-                              )
-                      else
-                        _institutions.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(32),
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        Icons.school_outlined,
-                                        size: 48,
-                                        color: Colors.grey[400],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        'No institutions yet',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                    const SizedBox(height: Space.xs),
+                                    InlineLink('Edit profile', onTap: _edit),
+                                  ],
                                 ),
-                              )
-                            : Column(
-                                children: _institutions.map((institution) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 12),
-                                    child: _buildInstitutionTile(
-                                      institution['name']!,
-                                      institution['studentCount']!,
-                                      institution['icon']!,
-                                    ),
-                                  );
-                                }).toList(),
                               ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 100),
-              ],
-            ),
-          ),
-        ),
-      ),
-      bottomNavigationBar: const SupervisorBottomNavBar(currentIndex: 2),
-    );
-  }
-
-  Widget _buildInfoRow(
-    IconData icon,
-    String label,
-    String value,
-    Color backgroundColor,
-  ) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 20, color: Colors.black54),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStudentTile(
-    String name,
-    String matric,
-    String school,
-    String department,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 45,
-            height: 45,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: Color(0xFF0A3D62),
-            ),
-            child: Center(
-              child: Text(
-                name.substring(0, 1).toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$matric ${department.isNotEmpty ? '• $department' : ''}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.school_outlined,
-                      size: 12,
-                      color: Colors.grey[500],
+                            ],
+                          ),
+                        ),
+                        const SectionLabel('Contact'),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: Space.page),
+                          child: Column(
+                            children: [
+                              const Rule(),
+                              DetailLine(label: 'Email', value: _v('email'), mono: true),
+                              DetailLine(label: 'Phone', value: _v('phone'), mono: true),
+                              DetailLine(label: 'Organisation', value: _v('organization')),
+                              DetailLine(label: 'Position', value: _v('position')),
+                            ],
+                          ),
+                        ),
+                        SectionLabel(
+                          'Interns',
+                          trailing: Text(plural(_students.length, 'student'), style: Txt.mono(Txt.small, color: Palette.inkSoft)),
+                        ),
+                        const Rule(),
+                        if (schools.isEmpty)
+                          const EmptyNote('No interns yet', detail: 'Students choose you as their supervisor when they set up their logbook.'),
+                        for (final entry in schools.entries)
+                          LedgerRow(
+                            showChevron: false,
+                            trailing: Text(plural(entry.value, 'student'), style: Txt.mono(Txt.small, color: Palette.inkSoft)),
+                            child: Text(entry.key, style: Txt.bodyStyle),
+                          ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        school,
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInstitutionTile(String name, int studentCount, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0A3D62).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 28, color: const Color(0xFF0A3D62)),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$studentCount student${studentCount > 1 ? 's' : ''} interning',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -13,6 +13,8 @@ analyzer:
     camel_case_types: ignore
     non_constant_identifier_names: ignore
     avoid_print: ignore
+    # Screen files keep their original camelCase names (studentDashboard.dart etc.).
+    file_names: ignore
 include: package:flutter_lints/flutter.yaml
 
 linter:
